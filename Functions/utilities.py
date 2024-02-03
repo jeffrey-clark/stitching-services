@@ -22,15 +22,13 @@ from Functions.TOTP import get_totp_token
 from Functions.encryption import decrypt_message
 import yaml
 
-def read_config():
-    # Define the file path
-    file_path = f"{root_dir}/Config/config.yml"
 
+def load_yaml(filepath):
     # Initialize an empty dictionary
     cfg = {}
 
     # Read configuration
-    with open(file_path, 'r') as file:
+    with open(filepath, 'r') as file:
         # Load the YAML file
         loaded_cfg = yaml.safe_load(file)
 
@@ -41,14 +39,19 @@ def read_config():
     return cfg
 
 
+def read_config():
+    return load_yaml(os.path.join(root_dir, "Config/config.yml"))
+
+def read_savio_credentials():
+    return load_yaml(os.path.join(root_dir, "Config/savio_credentials.yml"))
 
 
 def get_savio_password(pwd):
-    cfg = read_config()
-    savio_pin_enc = cfg.get('SAVIO_ENCRYPTED').get("PIN")
+    savcred = read_savio_credentials()
+    savio_pin_enc = savcred.get('SAVIO_ENCRYPTED').get("PIN")
     if savio_pin_enc is None:
         raise ValueError("Missing encrypted Savio PIN. Set it by running the encryption.py script")
-    savio_hotp_enc = cfg.get('SAVIO_ENCRYPTED').get("HOTP")
+    savio_hotp_enc = savcred.get('SAVIO_ENCRYPTED').get("HOTP")
     if savio_hotp_enc is None:
         raise ValueError("Missing encrypted Savio HOTP. Set it by running the encryption.py script")
     

@@ -59,7 +59,7 @@ if __name__ == "__main__":
     
     import Functions.utilities as u
 
-    cfg = u.read_config()
+    savcred = u.read_savio_credentials()
 
     # SET THE ENCRYPTED 
     print("First we will enter your true savio credentials:")
@@ -72,11 +72,11 @@ if __name__ == "__main__":
     secret_key_encrypted = encrypt_message(secret_key, password)
 
     # update the config file
-    if cfg.get('SAVIO_ENCRYPTED') is None:
-        cfg['SAVIO_ENCRYPTED'] = {}
-    cfg['SAVIO_ENCRYPTED']['PIN'] = pin_encrypted
-    cfg['SAVIO_ENCRYPTED']['HOTP'] = secret_key_encrypted
+    if savcred.get('SAVIO_ENCRYPTED') is None:
+        savcred['SAVIO_ENCRYPTED'] = {}
+    savcred['SAVIO_ENCRYPTED']['PIN'] = pin_encrypted
+    savcred['SAVIO_ENCRYPTED']['HOTP'] = secret_key_encrypted
 
     # Write the updated data back to the file
-    with open(os.path.join(root_dir, "Config", "config.yml"), 'w') as file:
-        yaml.dump(cfg, file)
+    with open(os.path.join(root_dir, "Config/savio_credentials.yml"), 'w') as file:
+        yaml.dump(savcred, file)
