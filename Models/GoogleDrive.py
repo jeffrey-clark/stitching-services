@@ -22,8 +22,11 @@ from googleapiclient.discovery import build
 from googleapiclient.http import MediaFileUpload, MediaIoBaseDownload
 import io
 import gspread
+import json
+import numpy as np
 
 import Functions.utilities as u
+from Functions.contract_utils import export_config_file
 
 cfg = u.read_config()
 
@@ -139,10 +142,13 @@ class GoogleSheet:
             return self.client.open_by_key(self.spreadsheet_id).worksheet(sheet_name)
         except gspread.exceptions.SpreadsheetNotFound:
             print(f"Spreadsheet with ID {self.spreadsheet_id} not found.")
-            raise
+            return None
         except gspread.exceptions.WorksheetNotFound:
             print(f"Worksheet '{sheet_name}' not found in the spreadsheet.")
-            raise
+            return None
+        except Exception as e:
+            print(f"Unexpected error accessing worksheet: {e}")
+            return None
 
     def read_cell(self, worksheet, row, col):
         try:
@@ -160,25 +166,36 @@ class GoogleSheet:
 
 
 
-class Config(GoogleSheet):
-    def __init__(self, spreadsheet_id, sheet_name, contract_name):
+config_columns = [
+            'contract_name', 'alg_kwargs', 'algorithm', 'pool_workers', 'surf_workers', 
+            'cropping_parameters', 'cropping_std_threshold', 'cropping_filter_sigma',
+            'cropping_origin', 'cropping_mode', 'crs', 'folders', 'hessian_threshold',
+            'lowe_ratio', 'min_inliers','min_matches', 'min_swath_size', 'ransac_reproj_threshold',
+            'swath_break_threshold', 'swath_reproj_threshold', 'threads_per_worker',
+            'subsample_swath', 'early_stopping', 'across_swath_threshold', 'response_threshold',
+            'cluster_inlier_threshold', 'cluster_link_method', 'individual_link_threshold',
+            'artifact_angle_threshold', 'soft_break_threshold', 'soft_individual_threshold',
+            'optim_inclusion_threshold', 'n_within', 'n_across', 'n_swath_neighbors', 'retry_threshold',
+            'n_iter', 'optim_lr_theta', 'optim_lr_scale', 'optim_lr_xy', 'raster_edge_size',
+            'raster_edge_constraint_type'
+        ]
+
+class ConfigCollection(GoogleSheet):
+    def __init__(self, spreadsheet_id, sheet_name):
         super().__init__(spreadsheet_id)
         self.sheet_name = sheet_name
-        self.contract_name = contract_name
-        try:
-            self.worksheet = self.get_worksheet(sheet_name)
-        except Exception as e:
-            print(f"Error initializing Config: {e}")
-            raise
 
-        self.row_id = self.find_contract_row()
-        if self.row_id is None:
-            print(f"Contract '{contract_name}' not found in the sheet.")
+        self.worksheet = self.get_worksheet(sheet_name)
+        if not self.worksheet:
+            print(f"Initialization failed: Worksheet '{sheet_name}' not found.")
+            return
 
-    def find_contract_row(self):
+        self.initialize_columns()
+
+    def find_contract_row(self, contract_name):
         try:
             contract_col = self.worksheet.col_values(1)
-            return contract_col.index(self.contract_name) + 1  # +1 because spreadsheet rows are 1-indexed
+            return contract_col.index(contract_name) + 1  # +1 because spreadsheet rows are 1-indexed
         except ValueError:
             return None
         except Exception as e:
@@ -207,6 +224,89 @@ class Config(GoogleSheet):
             print(f"Contract row not found.")
             return None
 
+    def check_sheet_integrity(self):
+        if not self.worksheet:
+            print(f"Worksheet not initialized.")
+            return False
+
+        actual_columns = self.worksheet.row_values(1)
+        if actual_columns != config_columns:
+            print(f"Sheet structure does not match expected configuration. Found: {actual_columns}")
+            return False
+        return True
+
+    def initialize_columns(self):
+        # Check if the first row is empty (assuming if first cell is empty, the row is empty)
+        if not self.worksheet.cell(1, 1).value:
+            # Populate the first row with config_columns
+            cell_list = self.worksheet.range(1, 1, 1, len(config_columns))
+            for i, cell in enumerate(cell_list):
+                cell.value = config_columns[i]
+            self.worksheet.update_cells(cell_list)
+            print("Column initialization complete.")
+        else:
+            # print("Sheet already has data. Column initialization skipped.")
+            pass
+
+    def contract_exists(self, contract_name):
+        try:
+            contract_col = self.worksheet.col_values(1)
+            return contract_name in contract_col
+        except Exception as e:
+            print(f"Error checking for existing contract: {e}")
+            raise
+
+    def add_contract(self, contract_name, config_data):
+        if self.contract_exists(contract_name):
+            print(f"Contract '{contract_name}' already exists. Aborting addition.")
+            return
+        
+        # Get the column headers from the first row
+        column_headers = self.worksheet.row_values(1)
+
+        # Create a list to store the values for the new row
+        new_row_values = [''] * len(column_headers)
+
+        # Fill in the values based on the column headers
+        for key, value in config_data.items():
+            if key in column_headers:
+                index = column_headers.index(key)
+                
+                # Ensure value is a string for the sheet
+                if not isinstance(value, str):
+                    value = str(value)
+
+                new_row_values[index] = value
+
+        # Insert the contract name at the appropriate place
+        if 'contract_name' in column_headers:
+            contract_name_index = column_headers.index('contract_name')
+            new_row_values[contract_name_index] = contract_name
+
+        # Add the new row to the worksheet
+        self.worksheet.append_row(new_row_values)
+        print(f"Contract '{contract_name}' added.")
+
+
+    def export_config(self, contract_name, machine_name):
+        # Retrieve configuration data for the specified contract
+        row_id = self.find_contract_row(contract_name)
+        if row_id is None:
+            print(f"Contract '{contract_name}' not found.")
+            return
+
+        # Assuming the first row contains column headers
+        column_headers = self.worksheet.row_values(1)
+        contract_data = self.worksheet.row_values(row_id)
+
+        # Convert row data to a dictionary
+        config_data = {column_headers[i]: contract_data[i] for i in range(len(column_headers))}
+
+        # Export the config file
+        return export_config_file(contract_name, config_data, machine_name)
+
+
+
 
 
 
@@ -222,9 +322,8 @@ if __name__ == "__main__":
     # work with the config files google sheet
     spreadsheet_id = cfg['google_drive']['config_files']['id']
     sheet_name = 'config'  # Replace with your actual sheet name
-    contract_name = 'SpecificContract'
 
-    config = Config(spreadsheet_id, sheet_name, contract_name)
+    all_configs = ConfigCollection(spreadsheet_id, sheet_name)
 
     # # Example: Get value from column 2
     # value = config.get_config_value(2)

@@ -1,18 +1,18 @@
 import os
 import Functions.utilities as u
+import yaml
+import json
 
 # read the config file here
 cfg = u.read_config()
 
-def generate_config_file(df, machine_name):
+def generate_default_config_data(df):
 
-    contract_name = df.contract_name.values[0]
-    # add verification here that there is only one contract name in the data
-
-
-    if machine_name.lower() == "savio":
-        paths = cfg['savio']
-        image_folders = [os.path.join(paths['images_folder'], x) + "/" for x in df.folder] 
+    if 'path' in df:
+        folders_list = df.path.values.tolist()  # Convert to a standard Python list if it's a pandas Series
+        folders = json.dumps(folders_list)
+    else:
+        folders = json.dumps([])  # Default to an empty list
 
 
     config_data = {
@@ -49,18 +49,14 @@ def generate_config_file(df, machine_name):
         "cropping_origin": "side",
         "cropping_mode": "levels",
         "crs": "EPSG:3857",
-        "folders": image_folders,
+        "folders": folders,
         "hessian_threshold": 100,
-        "img_cache_folder": os.path.join(paths['cache_folder'], contract_name, "SURF"),
-        "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_name),
         "lowe_ratio": 0.7,
         "min_inliers": 10,
         "min_matches": 10,
         "min_swath_size": 1,
         "ransac_reproj_threshold": 10.0,
-        "raster_output_folder": os.path.join(paths['results_folder'], contract_name),
         "swath_break_threshold": 30,
-        "swath_folder": os.path.join(paths['cache_folder'], contract_name),
         "swath_reproj_threshold": 50,
         "threads_per_worker": None,
         "subsample_swath": True,
@@ -86,5 +82,57 @@ def generate_config_file(df, machine_name):
         "raster_edge_constraint_type": "max"
     }
 
-    pass
+    # Serialize 'cropping_parameters' as a JSON string
+    cropping_parameters = config_data.get('cropping_parameters', {})
+    config_data['cropping_parameters'] = json.dumps(cropping_parameters)
+
+
+    return config_data
+
     
+
+def export_config_file(contract_name, config_data, machine_name):
+
+    # Deserialize 'folders' from JSON string if it's a string
+    folders = config_data.get('folders', '[]')
+    if isinstance(folders, str):
+        folders = json.loads(folders)
+
+    # Machine-specific processing
+    paths = cfg[machine_name.lower()]
+    if machine_name.lower() == "savio":
+        image_folders = [os.path.join(paths['images_folder'], os.path.basename(os.path.dirname(x))) + "/" for x in folders]
+    else:  # For 'tabei' and potentially other machines
+        image_folders = folders
+
+    # Update config_data with the processed image_folders
+    config_data['folders'] = image_folders
+
+    # Handle 'cropping_parameters' and similar fields
+    cropping_parameters = config_data.get('cropping_parameters', '{}')
+    if isinstance(cropping_parameters, str):
+        cropping_parameters = json.loads(cropping_parameters)
+
+    config_data['cropping_parameters'] = cropping_parameters
+
+    machine_specific_data = {
+        "folders": image_folders,
+        "img_cache_folder": os.path.join(paths['cache_folder'], contract_name, "SURF"),
+        "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_name),
+        "raster_output_folder": os.path.join(paths['results_folder'], contract_name),
+        "swath_folder": os.path.join(paths['cache_folder'], contract_name),
+    }
+
+    # Combine common and machine-specific configuration data
+    config_data.update(machine_specific_data)
+
+    # Specify the file path for the YAML file
+    output_file_path = os.path.join("Files/config_files", f"{contract_name}.yaml")
+
+    # Write the configuration data to a YAML file
+    with open(output_file_path, 'w') as file:
+        yaml.dump(config_data, file, default_flow_style=False)
+
+    print(f"Configuration file exported: {output_file_path}")
+    return output_file_path
+

@@ -20,9 +20,9 @@ sys.path.append(root_dir)
 
 import os
 import pandas as pd
-from Models.GoogleDrive import GoogleDriveService  # Assuming you have a separate model for Google Drive
+from Models.GoogleDrive import GoogleDriveService, ConfigCollection  # Assuming you have a separate model for Google Drive
 import Functions.utilities as u
-from Functions.contract_utils import generate_config_file
+from Functions.contract_utils import generate_default_config_data, export_config_file
 
 cfg = u.read_config()
 do = cfg['google_drive']['data_overview']
@@ -168,13 +168,20 @@ class Contract:
 
 if __name__ == "__main__":
 
+    # Load the contract from Data Overview file.
     nigeria_contracts = Country('Nigeria', refresh=False)
-
     my_contract = nigeria_contracts.get_contract(nigeria_contracts.contract_names[0])
+    contract_name = my_contract.name
+    contract_data = my_contract.df
 
-    print(my_contract)
-    print(my_contract.df)
 
-    generate_config_file(my_contract.df, "savio")
+    # now lets upload a config file to our config Google Sheet if it does not exist yet
+    spreadsheet_id = cfg['google_drive']['config_files']['id']
+    all_configs = ConfigCollection(spreadsheet_id, 'config')
 
+    config_data = generate_default_config_data(contract_data)
+    all_configs.add_contract(contract_name, config_data)
+    
+    # expor the contract for savio
+    all_configs.export_config(contract_name, "savio")
 
