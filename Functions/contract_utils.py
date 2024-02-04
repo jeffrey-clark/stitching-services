@@ -6,6 +6,36 @@ import json
 # read the config file here
 cfg = u.read_config()
 
+def serialize_for_google_sheet(data):
+    """
+    Serializes complex data types (like lists and dictionaries) to JSON strings.
+    Handles None, True, and False explicitly.
+    """
+    if isinstance(data, (dict, list)):
+        return json.dumps(data)
+    elif data is None:
+        return 'null'  # Serialize None as 'null'
+    elif isinstance(data, bool):
+        return str(data).lower()  # Serialize boolean as 'true' or 'false'
+    return data
+
+def deserialize_from_google_sheet(data):
+    """
+    Deserializes data from a JSON string back to Python objects.
+    Handles 'null', 'true', and 'false' explicitly.
+    """
+    if data == 'null':
+        return None  # Deserialize 'null' as None
+    elif data == 'true':
+        return True  # Deserialize 'true' as True
+    elif data == 'false':
+        return False  # Deserialize 'false' as False
+
+    try:
+        return json.loads(data)
+    except (json.JSONDecodeError, TypeError):
+        return data
+
 def generate_default_config_data(df):
 
     if 'path' in df:
@@ -16,9 +46,7 @@ def generate_default_config_data(df):
 
 
     config_data = {
-        "alg_kwargs": {
-            "hessian_threshold": 100
-        },
+        "alg_kwargs": {"hessian_threshold": 100},
         "algorithm": "SURF",
         "pool_workers": 30,
         "surf_workers": 15,
@@ -82,41 +110,111 @@ def generate_default_config_data(df):
         "raster_edge_constraint_type": "max"
     }
 
-    # Serialize 'cropping_parameters' as a JSON string
-    cropping_parameters = config_data.get('cropping_parameters', {})
-    config_data['cropping_parameters'] = json.dumps(cropping_parameters)
-
-
     return config_data
 
-    
+
+
+def config_format(config_data):
+    # Define the desired order of keys and their formatting
+    key_order = [
+        ("alg_kwargs", True),  # (key, is_complex_structure)
+        ("algorithm", False),
+        ("", False),  # Empty string for extra newline
+        ("pool_workers", False),
+        ("surf_workers", False),
+        ("", False),
+        ("cropping_parameters", True),
+        ("cropping_std_threshold", False),
+        ("cropping_filter_sigma", False),
+        ("cropping_origin", False),
+        ("cropping_mode", False),
+        ("", False),
+        ("crs", False),
+        ("folders", True),
+        ("", False),
+        ("hessian_threshold", False),
+        ("img_cache_folder", False),
+        ("checkpoint_cache_folder", False),
+        ("lowe_ratio", False),
+        ("min_inliers", False),
+        ("min_matches", False),
+        ("min_swath_size", False),
+        ("ransac_reproj_threshold", False),
+        ("raster_output_folder", False),
+        ("", False),
+        ("swath_break_threshold", False),
+        ("swath_folder", False),
+        ("swath_reproj_threshold", False),
+        ("threads_per_worker", False),
+        ("", False),
+        ("subsample_swath", False),
+        ("early_stopping", False),
+        ("across_swath_threshold", False),
+        ("response_threshold", False),
+        ("", False),
+        ("cluster_inlier_threshold", False),
+        ("cluster_link_method", False),
+        ("individual_link_threshold", False),
+        ("artifact_angle_threshold", False),
+        ("soft_break_threshold", False),
+        ("soft_individual_threshold", False),
+        ("", False),
+        ("optim_inclusion_threshold", False),
+        ("n_within", False),
+        ("n_across", False),
+        ("n_swath_neighbors", False),
+        ("retry_threshold", False),
+        ("n_iter", False),
+        ("optim_lr_theta", False),
+        ("optim_lr_scale", False),
+        ("optim_lr_xy", False),
+        ("", False),
+        ("raster_edge_size", False),
+        ("raster_edge_constraint_type", False)
+    ]
+
+    yaml_lines = []
+    for key, is_complex in key_order:
+        if key:
+            value = config_data.get(key)
+            if is_complex:
+                # Complex structures (lists, dicts)
+                dumped_value = yaml.dump({key: value}, default_flow_style=False, sort_keys=False).split('\n')
+                yaml_lines.extend(dumped_value[:-1])
+            else:
+                # Formatting simple values
+                if isinstance(value, bool):
+                    formatted_value = str(value).lower()
+                elif value is None:
+                    formatted_value = 'null'
+                else:
+                    formatted_value = value
+                line = f"{key}: {formatted_value}"
+                yaml_lines.append(line)
+        else:
+            # Add an extra newline for spacing
+            yaml_lines.append("")
+
+    formatted_yaml = '\n'.join(yaml_lines)
+    return formatted_yaml
+
+
 
 def export_config_file(contract_name, config_data, machine_name):
-
-    # Deserialize 'folders' from JSON string if it's a string
-    folders = config_data.get('folders', '[]')
-    if isinstance(folders, str):
-        folders = json.loads(folders)
+    paths = cfg[machine_name.lower()]
 
     # Machine-specific processing
-    paths = cfg[machine_name.lower()]
     if machine_name.lower() == "savio":
-        image_folders = [os.path.join(paths['images_folder'], os.path.basename(os.path.dirname(x))) + "/" for x in folders]
-    else:  # For 'tabei' and potentially other machines
-        image_folders = folders
+        # Assuming 'folders' is already a list of paths
+        image_folders = [os.path.join(paths['images_folder'], os.path.basename(os.path.dirname(x))) + "/" for x in config_data['folders']]
+    else:  # For 'tabei' and other machines
+        image_folders = config_data['folders']  # Already in the correct format
 
     # Update config_data with the processed image_folders
     config_data['folders'] = image_folders
 
-    # Handle 'cropping_parameters' and similar fields
-    cropping_parameters = config_data.get('cropping_parameters', '{}')
-    if isinstance(cropping_parameters, str):
-        cropping_parameters = json.loads(cropping_parameters)
-
-    config_data['cropping_parameters'] = cropping_parameters
-
+    # Machine-specific paths
     machine_specific_data = {
-        "folders": image_folders,
         "img_cache_folder": os.path.join(paths['cache_folder'], contract_name, "SURF"),
         "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_name),
         "raster_output_folder": os.path.join(paths['results_folder'], contract_name),
@@ -129,10 +227,13 @@ def export_config_file(contract_name, config_data, machine_name):
     # Specify the file path for the YAML file
     output_file_path = os.path.join("Files/config_files", f"{contract_name}.yaml")
 
-    # Write the configuration data to a YAML file
+     # Serialize config_data using the custom format function
+    custom_yaml_content = config_format(config_data)
+
+    # Write the custom YAML content to file
+    output_file_path = os.path.join("Files/config_files", f"{contract_name}.yaml")
     with open(output_file_path, 'w') as file:
-        yaml.dump(config_data, file, default_flow_style=False)
+        file.write(custom_yaml_content)
 
     print(f"Configuration file exported: {output_file_path}")
     return output_file_path
-

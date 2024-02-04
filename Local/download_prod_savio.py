@@ -54,7 +54,7 @@ def download_results(config_filename, name=None):
     
     # Ensure the local directory exists
     contract_name = os.path.basename(results)
-    local_destination = os.path.join(cfg['local_prod'], contract_name)
+    local_destination = os.path.join(cfg['local']['prod'], contract_name)
     os.makedirs(local_destination, exist_ok=True)
  
     # now create the remote and local fps

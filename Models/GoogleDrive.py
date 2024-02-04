@@ -26,7 +26,7 @@ import json
 import numpy as np
 
 import Functions.utilities as u
-from Functions.contract_utils import export_config_file
+from Functions.contract_utils import export_config_file, deserialize_from_google_sheet, serialize_for_google_sheet
 
 cfg = u.read_config()
 
@@ -205,7 +205,8 @@ class ConfigCollection(GoogleSheet):
     def get_config_value(self, col):
         if self.row_id:
             try:
-                return self.read_cell(self.worksheet, self.row_id, col)
+                value = self.read_cell(self.worksheet, self.row_id, col)
+                return deserialize_from_google_sheet(value)
             except Exception as e:
                 print(f"Error reading cell: {e}")
                 raise
@@ -260,7 +261,7 @@ class ConfigCollection(GoogleSheet):
         if self.contract_exists(contract_name):
             print(f"Contract '{contract_name}' already exists. Aborting addition.")
             return
-        
+
         # Get the column headers from the first row
         column_headers = self.worksheet.row_values(1)
 
@@ -272,11 +273,10 @@ class ConfigCollection(GoogleSheet):
             if key in column_headers:
                 index = column_headers.index(key)
                 
-                # Ensure value is a string for the sheet
-                if not isinstance(value, str):
-                    value = str(value)
+                # Use the serialize_for_google_sheet function
+                serialized_value = serialize_for_google_sheet(value)
 
-                new_row_values[index] = value
+                new_row_values[index] = serialized_value
 
         # Insert the contract name at the appropriate place
         if 'contract_name' in column_headers:
@@ -299,11 +299,20 @@ class ConfigCollection(GoogleSheet):
         column_headers = self.worksheet.row_values(1)
         contract_data = self.worksheet.row_values(row_id)
 
-        # Convert row data to a dictionary
-        config_data = {column_headers[i]: contract_data[i] for i in range(len(column_headers))}
+        # Deserialize and convert row data to a dictionary
+        config_data = {}
+        for i, key in enumerate(column_headers):
+            value = deserialize_from_google_sheet(contract_data[i])
+            # Explicitly convert 'True'/'False' strings to boolean values
+            if value == 'True':
+                value = True
+            elif value == 'False':
+                value = False
+            config_data[key] = value
 
-        # Export the config file
+        # Continue with the export function
         return export_config_file(contract_name, config_data, machine_name)
+
 
 
 

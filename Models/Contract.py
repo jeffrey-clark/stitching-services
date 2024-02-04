@@ -171,7 +171,7 @@ if __name__ == "__main__":
     # Load the contract from Data Overview file.
     nigeria_contracts = Country('Nigeria', refresh=False)
     my_contract = nigeria_contracts.get_contract(nigeria_contracts.contract_names[0])
-    contract_name = my_contract.name
+    contract_name = test
     contract_data = my_contract.df
 
 
