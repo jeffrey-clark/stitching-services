@@ -18,7 +18,21 @@ Before running code you also need to set up the file paths to savio and Google b
 
 
 
+## Installing environemnt from file
+
+First export the environment
+
+`conda env export --from-history > environment.yml`
+
+Then copy over the file to the other machine. Remember to change the conda prefix in the envionrment file, to match that of the new computer.
+
+ Then install the environment on the other machine
+
+`conda env create -f environment.yml `
 
 
- 
+
+
+
+
 

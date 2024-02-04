@@ -1,3 +1,4 @@
 Config/*
 Files/*
 *.pyc
+.DS_Store

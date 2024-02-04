@@ -1,0 +1,11 @@
+name: stitch-service
+channels:
+  - conda-forge
+  - defaults
+dependencies:
+  - python=3.11
+  - paramiko
+  - scp
+  - pyyaml
+  - tqdm
+prefix: /Users/jeffrey/miniconda3/envs/stitch-service
