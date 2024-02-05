@@ -46,20 +46,23 @@ def tqdm_callback(t):
 
 # Decorator function to ensure connection for SavioClient methods
 # as I understand it only works for shell scripts
-def ensure_connection(host_type="shell"):
+def ensure_connection(host_type="shell", verbose=False):
     def decorator(func):
         def wrapper(self, *args, **kwargs):
+            _verbose = verbose  # Use the verbose setting provided to the decorator
+
             was_connected = self.connected
             should_reconnect = was_connected and self.host_type != host_type
 
             if not was_connected or should_reconnect:
-                if was_connected:
+                if was_connected and _verbose:
                     print(f"Conflicting host type, closing {self.host_type}, and opening {host_type}")
-                    self.close()  # Close existing connection if the types don't match
+                self.close()
                 self.connect(host_type)
                 self.connected = True
             else:
-                print("Using existing connection...")
+                if _verbose:
+                    print("Using existing connection...")
 
             try:
                 return func(self, *args, **kwargs)
@@ -69,7 +72,6 @@ def ensure_connection(host_type="shell"):
                     self.connected = False
         return wrapper
     return decorator
-
 
 class TabeiClient:
     def __init__(self):
@@ -119,7 +121,7 @@ class TabeiClient:
         self.ssh.close()
         self.connected = False
         self.host_type = None
-        print("closed Savio connection")
+        print("closed Tabei connection")
 
 
 
@@ -164,6 +166,48 @@ class TabeiClient:
             print(f"An error occurred during file download: {e}")
             raise e
         
+    @ensure_connection('ftp')
+    def get_file_sizes_in_folders(self, folder_paths):
+        """
+        Returns the file sizes of all files within the specified folders.
+
+        :param folder_paths: List of paths to the folders
+        :return: Dictionary where keys are folder paths and values are lists of tuples (file name, file size)
+        """
+        folder_sizes = {}
+        for folder_path in folder_paths:
+            try:
+                files = self.sftp.listdir(folder_path)
+                folder_sizes[folder_path] = [(file, self.sftp.stat(os.path.join(folder_path, file)).st_size) for file in files if not file.startswith('.')]
+            except Exception as e:
+                print(f"An error occurred while accessing {folder_path}: {e}")
+        return folder_sizes
+
+
+    @ensure_connection('shell', False)
+    def get_folder_total_sizes(self, folder_paths):
+        """
+        Returns the total file sizes for each specified folder by executing a command on the server.
+
+        :param folder_paths: List of paths to the folders
+        :return: Dictionary where keys are folder paths and values are total sizes of the folders in bytes
+        """
+        folder_total_sizes = {}
+        with tqdm(total=len(folder_paths), desc="Getting folder sizes", file=sys.stdout) as pbar:
+            for folder_path in folder_paths:
+                try:
+                    command = f"du -sb {folder_path} | cut -f1"
+                    output = self.execute_command(command)
+                    size = int(output.strip())  # Convert the output to an integer
+                    folder_total_sizes[folder_path] = size
+                except Exception as e:
+                    print(f"An error occurred while accessing {folder_path}: {e}")
+                finally:
+                    time.sleep(3)  # Include the sleep as per your requirement
+                    pbar.update(1)  # Update progress for each processed folder path
+        return folder_total_sizes
+    
+        
     @ensure_connection('shell')
     def send_tmux_command(self, session_name, command):
         # Using bash -c to execute the tmux command
@@ -191,8 +235,9 @@ class TabeiClient:
 
 if __name__ == "__main__":
     t = TabeiClient()
-    t.send_tmux_command('test_session', "python test_sffcript.py")
-    tmux_sessions = t.list_tmux_sessions()
-    
-    #x = s.listdir("/home/jeffrey.clark")
-    print(tmux_sessions)
+    t.connect('ftp')
+    x = t.listdir("/home/jeffrey.clark/")
+    print(x)
+    filesizes = t.get_folder_total_sizes(["/mnt/shackleton_shares/lab/aerial_history_project/Images/Nigeria/NCAP_DOS_101_NG_0007/", "/global/scratch/users/jeffreyclark/Images/Nigeria/NCAP_DOS_SHELL_BP_0049"])
+    print(filesizes)
+    t.close()

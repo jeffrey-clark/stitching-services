@@ -1,6 +1,6 @@
 # Stitching Services
 
-This repository contains code to simplicy and scale the stitiching process for the Aerial History Project.
+This repository contains code to simplify and scale the stitiching process for the Aerial History Project.
 
 
 

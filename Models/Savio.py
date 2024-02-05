@@ -44,22 +44,23 @@ def tqdm_callback(t):
     return inner_callback
 
 
-# Decorator function to ensure connection for SavioClient methods
-# as I understand it only works for shell scripts
-def ensure_connection(host_type="shell"):
+def ensure_connection(host_type="shell", verbose=True):
     def decorator(func):
         def wrapper(self, *args, **kwargs):
+            _verbose = verbose  # Use the verbose setting provided to the decorator
+
             was_connected = self.connected
             should_reconnect = was_connected and self.host_type != host_type
 
             if not was_connected or should_reconnect:
-                if was_connected:
+                if was_connected and _verbose:
                     print(f"Conflicting host type, closing {self.host_type}, and opening {host_type}")
-                    self.close()  # Close existing connection if the types don't match
+                self.close()
                 self.connect(host_type)
                 self.connected = True
             else:
-                print("Using existing connection...")
+                if _verbose:
+                    print("Using existing connection...")
 
             try:
                 return func(self, *args, **kwargs)
@@ -208,27 +209,92 @@ class SavioClient:
             else:
                 print(f"Skipping {directory}, not a directory.")
 
+
+    def convert_to_savio_paths(self, directories, country):
+        """
+        Converts Tabei directory paths to Savio directory paths.
+
+        :param directories: List of Tabei directory paths
+        :param country: Country name for the Savio directory structure
+        :return: List of tuples (local_directory, savio_directory)
+        """
+        directory_mappings = []
+        for directory in directories:
+            folder_name = os.path.basename(directory.rstrip('/'))
+            savio_path = os.path.join(cfg['savio']['images_folder'], country, folder_name)
+            directory_mappings.append((directory, savio_path))
+        return directory_mappings
+
+
     @ensure_connection('ftp')
     def upload_image_folders(self, directories, country):
-        for directory in directories:
-            if os.path.isdir(directory):
-                folder_name = os.path.basename(directory.rstrip('/'))
-                full_dest_path = os.path.join(cfg['savio']['images_folder'], country, folder_name)
+        """
+        Uploads image folders to Savio using the converted directory paths.
 
-                # Ensure the remote directory exists
-                self.makedirs(full_dest_path)
+        :param directories: List of Tabei directory paths
+        :param country: Country name for the Savio directory structure
+        """
+        directory_mappings = self.convert_to_savio_paths(directories, country)
 
-                file_paths = [os.path.join(directory, file) for file in os.listdir(directory)]
-                remote_paths = [os.path.join(full_dest_path, file) for file in os.listdir(directory)]
+        for local_directory, savio_directory in directory_mappings:
+            # Ensure the remote directory exists
+            self.makedirs(savio_directory)
 
-                self.upload_files_sftp(file_paths, remote_paths)
-            else:
-                print(f"Skipping {directory}, not a directory.")
+            file_paths = [os.path.join(local_directory, file) for file in os.listdir(local_directory)]
+            remote_paths = [os.path.join(savio_directory, file) for file in os.listdir(local_directory)]
+
+            self.upload_files_sftp(file_paths, remote_paths)
 
         print("Upload complete.")
     
+    @ensure_connection('ftp')
+    def get_file_sizes_in_folders(self, folder_paths):
+        """
+        Returns the file sizes of all files within the specified folders.
+
+        :param folder_paths: List of paths to the folders
+        :return: Dictionary where keys are folder paths and values are lists of tuples (file name, file size)
+        """
+        folder_sizes = {}
+        for folder_path in folder_paths:
+            try:
+                files = self.sftp.listdir(folder_path)
+                folder_sizes[folder_path] = [(file, self.sftp.stat(os.path.join(folder_path, file)).st_size) for file in files if not file.startswith('.')]
+            except Exception as e:
+                print(f"An error occurred while accessing {folder_path}: {e}")
+        return folder_sizes
+
+    @ensure_connection('shell', verbose=False)
+    def get_folder_total_sizes(self, folder_paths):
+        """
+        Returns the total file sizes for each specified folder by executing a command on the server.
+
+        :param folder_paths: List of paths to the folders
+        :return: Dictionary where keys are folder paths and values are total sizes of the folders in bytes
+        """
+        folder_total_sizes = {}
+        with tqdm(total=len(folder_paths), desc="Getting folder sizes", file=sys.stdout) as pbar:
+            for folder_path in folder_paths:
+                try:
+                    command = f"du -sb {folder_path} | cut -f1"
+                    output = self.execute_command(command)
+                    size = int(output.strip())  # Convert the output to an integer
+                    folder_total_sizes[folder_path] = size
+                except Exception as e:
+                    print(f"An error occurred while accessing {folder_path}: {e}")
+                finally:
+                    time.sleep(3)  # Sleep for 3 seconds
+                    pbar.update(1)  # Update progress for each processed folder path
+        return folder_total_sizes
+
 
 if __name__ == "__main__":
     s = SavioClient()
+    s.connect()
     x = s.listdir("/global/home/users/jeffreyclark")
     print(x)
+    filesizes = s.get_file_sizes_in_folders(["/global/scratch/users/jeffreyclark/Images/Nigeria/NCAP_DOS_SHELL_BP_0043", "/global/scratch/users/jeffreyclark/Images/Nigeria/NCAP_DOS_SHELL_BP_0049"])
+    print(filesizes)
+    s.close()
+
+

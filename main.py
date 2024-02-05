@@ -6,6 +6,8 @@ from Functions.shell_utils import generate_shell_script
 from Models.Savio import SavioClient, pwd
 from Models.Tabei import TabeiClient
 import os
+import sys
+from tqdm import tqdm
 
 
 cfg = u.read_config()
@@ -28,36 +30,84 @@ def main(machine, country, contract_name, contract_alias=None):
     config_db.add_contract(contract_alias, config_data)
     
     # export the contract for savio
-    config_fp = config_db.export_config(contract_alias, machine)
+    config_fp = config_db.export_config(contract_alias, country, machine)
+    
+
+    # ----- upload the files from Tabei to Machine -----
+
+
+    t = TabeiClient()
+    s = SavioClient()
+
+    tmux_name = f"{contract_alias}_upload"  # set the tmux name
+
+    folders = my_contract.df.path.to_list()
+
+    # first check if there is a tmux session going
+    tmux_sessions_response = t.list_tmux_sessions()
+    if tmux_name in tmux_sessions_response:
+        # return "Upload is still ongoing. Please wait until complete."
+        print("Upload is still ongoing. Please wait until complete.")
+
+    
+    # if uploads are complete, we do filesize comparisons to verify correct upload
+    print("  Fetching filesizes from Tabei:")
+    tabei_sizes = t.get_folder_total_sizes(folders)
+  
+    print("  Fetching filesizes from Savio:")
+    savio_directory_mappings = s.convert_to_savio_paths(folders, country)
+    savio_paths = [savio_path for _, savio_path in savio_directory_mappings]
+    savio_sizes = s.get_folder_total_sizes(savio_paths)
+
+
+    with tqdm(total=len(savio_directory_mappings), desc="Checking folder sizes", file=sys.stdout) as pbar:
+        for tabei_key, savio_key in savio_directory_mappings:
+            tabei_size = tabei_sizes.get(tabei_key)
+            savio_size = savio_sizes.get(savio_key)
+
+            # Comparing sizes with a tolerance of 0.1%
+            if tabei_size is not None and savio_size is not None:
+                size_difference = abs(tabei_size - savio_size)
+                allowed_difference = 0.001 * max(tabei_size, savio_size)  # 0.1% of the larger size
+
+                if size_difference <= allowed_difference:
+                    pbar.update(1)  # Update progress for each checked folder
+                    continue
+                else:
+                    raise Exception(f"Size mismatch beyond tolerance for {tabei_key} ({tabei_size} bytes) and {savio_key} ({savio_size} bytes), difference: {size_difference} bytes")
+            else:
+                raise Exception(f"Size information missing for {tabei_key} or {savio_key}")
+
+    print("All folder sizes match within tolerance.")
+
+
+
+
+
+
+    # env_interpreter = os.path.join(cfg['tabei']['conda_env'], "bin", "python")
+    # cmd_path = os.path.join(cfg['tabei']['stitching-services'], "Tabei/upload_folders.py") 
+    # folder_string = " ".join(folders)
+    # set_password = f"export SAVIO_DECRYPTION_PASSWORD={pwd}"  # need to send the password for SavioClient decryption.
+    # command = f"{set_password} && {env_interpreter} {cmd_path} --paths {folder_string} --country {country} --machine Savio"
+
     
 
 
-    # upload the files from Tabei to Machine
-    folders = my_contract.df.path.to_list()[0:1]
-    folder_string = " ".join(folders)
-
-    cmd_activate_conda = f"conda activate stitch-service"  # or use "conda activate"
-    cmd_path = os.path.join(cfg['tabei']['stitching-services'], "Tabei/upload_folders.py") 
-    cmd_upload = f"python {cmd_path} --paths {folder_string} --country {country} --machine Savio"
-    command = f"{cmd_activate_conda} && {cmd_upload}"
-
-    t = TabeiClient()
-    # set the decryption password as an environmnet variable
-    t.execute_command(f"export SAVIO_DECRYPTION_PASSWORD='{pwd}'")
-    t.send_tmux_command(f"Image Upload: {contract_alias}", command)
-    exit()
+    # # send the command to upload
+    # t.send_tmux_command(f"{contract_alias}_upload", command)
 
 
-    # now create the shell script
-    shell_fp = generate_shell_script(contract_alias, machine, 1)
+ 
+    
+    # -------------------------------------------------
+
+    # config_fp_remote = os.path.join(cfg[machine]['config_folder'], os.path.basename(config_fp))
+    # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
 
 
-    config_fp_remote = os.path.join(cfg[machine]['config_folder'], os.path.basename(config_fp))
-    shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
-
-
-    s = SavioClient()
-    s.upload_files_sftp([config_fp, shell_fp], [config_fp_remote, shell_fp_remote])
+    # s = SavioClient()
+    # s.upload_files_sftp([config_fp, shell_fp], [config_fp_remote, shell_fp_remote])
 
     # s.upload_files_sftp()
 
