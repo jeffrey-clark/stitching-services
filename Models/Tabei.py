@@ -22,19 +22,19 @@ import yaml
 import getpass
 from tqdm import tqdm
 from paramiko import SSHClient
+from cryptography.hazmat.primitives import serialization
+from cryptography.hazmat.primitives.serialization import load_pem_private_key
+from paramiko.rsakey import RSAKey
+import paramiko
 import time
 import glob
+import io
 
 import Functions.utilities as u
 
 # Load configuration
 cfg = u.read_config()
-
-# Try to get the password from an environment variable (used on Tabei file uploads)
-pwd = os.getenv('SAVIO_DECRYPTION_PASSWORD')
-
-if not pwd:
-    pwd = getpass.getpass("  Enter Savio decryption password: ")
+pwd = getpass.getpass("  Enter Tabei decryption password: ")
 
 
 # Define the tqdm callback function
@@ -71,43 +71,36 @@ def ensure_connection(host_type="shell"):
     return decorator
 
 
-# Define the SavioClient class
-class SavioClient:
+class TabeiClient:
     def __init__(self):
-        self.username = cfg['savio']['username']
+        self.username = cfg['tabei']['username']
+        self.ssh_key_path = cfg['tabei']['key_path']
         self.ssh = SSHClient()
         self.sftp = None
         self.connected = False
         self.host_type = None
 
     def connect(self, host_type="shell"):
-
-        if host_type == 'shell':
-            hostname = 'hpc.brc.berkeley.edu'
-        elif host_type == 'ftp':
-            hostname = 'dtn.brc.berkeley.edu'
-        else:
-            raise ValueError("Invalid host_type. Expected 'shell' or 'ftp'.")
-        print(f"opening Savio connection: {host_type}")
-        self.ssh.load_system_host_keys()
+        print("Opening Tabei connection")
+        self.ssh.set_missing_host_key_policy(paramiko.AutoAddPolicy())
         if not self.connected or self.host_type != host_type:
-            self._connect_ssh(hostname)
+            self._connect_ssh()
             self.connected = True
             self.host_type = host_type
-
             if host_type == 'ftp':
                 self.sftp = self.ssh.open_sftp()
 
-
-    def _connect_ssh(self, hostname):
+    def _connect_ssh(self):
         max_attempts = 5
         attempts = 0
-
         while attempts < max_attempts:
             try:
-                self.ssh.connect(hostname=hostname, username=self.username, password=u.get_savio_password(pwd))
+                self.ssh.connect(hostname="tabei.gspp.berkeley.edu", 
+                                 username=self.username, 
+                                 key_filename=self.ssh_key_path, 
+                                 passphrase=pwd)
                 self.connected = True
-                return  # Successfully connected, exit the method
+                return
             except Exception as e:
                 attempts += 1
                 print(f"Failed to connect (Attempt {attempts}/{max_attempts}): {e}")
@@ -116,8 +109,7 @@ class SavioClient:
                     time.sleep(10)
                 else:
                     print("Maximum connection attempts reached. Aborting.")
-                    raise  # Or handle the exception as needed
-
+                    raise
 
     def close(self):
         if self.sftp and self.host_type == 'ftp':
@@ -140,16 +132,10 @@ class SavioClient:
             print("Error:", error)
         return output
     
-    @ensure_connection('shell')
-    def get_job_list(self):
-        sq = self.execute_command("sq")
-        return sq
-    
     @ensure_connection('ftp')
     def listdir(self, path):
         return [x for x in self.sftp.listdir(path) if not x.startswith('.')]
 
-    
     @ensure_connection('ftp')
     def upload_files_sftp(self, file_paths, remote_paths):
         try:
@@ -177,26 +163,36 @@ class SavioClient:
         except Exception as e:
             print(f"An error occurred during file download: {e}")
             raise e
+        
+    @ensure_connection('shell')
+    def send_tmux_command(self, session_name, command):
+        # Using bash -c to execute the tmux command
+        full_command = f"bash -c \"tmux new-session -d -s {session_name} '{command}'\""
+        output = self.execute_command(full_command)
+        if output:
+            print(f"Output from tmux command: {output}")
+        else:
+            print(f"Started tmux session '{session_name}' with command: {command}")
 
+    @ensure_connection('shell')
+    def list_tmux_sessions(self):
+        output = self.execute_command("tmux list-sessions")
+        
+        # if there are no tmux sessions running it will return a string starting with error
+        if "error" in output.lower()[:10]:
+            return None
+        
+        return output
 
-    def upload_image_folders(self, source_pattern, country):
-        directories = glob.glob(source_pattern)
-        for directory in directories:
-            if os.path.isdir(directory):
-                folder_name = os.path.basename(directory.rstrip('/'))
-                full_dest_path = os.path.join(cfg['savio']['images_folder'], country, folder_name)
-                
-                file_paths = [os.path.join(directory, file) for file in os.listdir(directory)]
-                remote_paths = [os.path.join(full_dest_path, file) for file in os.listdir(directory)]
-
-                self.upload_files_sftp(file_paths, remote_paths)
-            else:
-                print(f"Skipping {directory}, not a directory.")
+    
 
 
     
 
 if __name__ == "__main__":
-    s = SavioClient()
-    x = s.listdir("/global/home/users/jeffreyclark")
-    print(x)
+    t = TabeiClient()
+    t.send_tmux_command('test_session', "python test_sffcript.py")
+    tmux_sessions = t.list_tmux_sessions()
+    
+    #x = s.listdir("/home/jeffrey.clark")
+    print(tmux_sessions)

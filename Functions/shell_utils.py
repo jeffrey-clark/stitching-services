@@ -11,7 +11,7 @@ def _savio_init_and_crop(contract_alias):
 
     shell_script_content = f"""#!/bin/bash
 # Job name:
-#SBATCH --job-name={job_name}_stage_1     
+#SBATCH --job-name={contract_alias}_stage_1     
 #
 # Account:
 #SBATCH --account=co_laika
@@ -43,20 +43,23 @@ singularity run /global/home/groups/co_laika/ahp/surf.sif \\
 
 
 
-def generate_shell_script(contract_alias, config_path, computer, shell_template_id):
+def generate_shell_script(contract_alias, machine, shell_template_id):
 
-    if computer.lower() == "savio":
+    if machine.lower() == "savio":
         func_map = {1: _savio_init_and_crop}
     else:
         raise ValueError('ONLY SAVIO SO FAR')
     
     # make sure that we have the 
 
-    fp = os.path.join("Files/job_shells", computer.lower(), f"{contract_alias}_{shell_template_id}.sh")
+    fp = os.path.join("Files/job_shells", machine.lower(), f"{contract_alias}_{shell_template_id}.sh")
     os.makedirs(os.path.dirname(fp), exist_ok=True)
 
+
     with open(fp, "w") as file:
-        file.write(func_map[shell_template_id](contract_alias, config_path))
+        file.write(func_map[shell_template_id](contract_alias))
+
+    return fp
 
 
 if __name__ == "__main__":
