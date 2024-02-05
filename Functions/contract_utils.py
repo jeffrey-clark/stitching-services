@@ -200,13 +200,13 @@ def config_format(config_data):
 
 
 
-def export_config_file(contract_name, config_data, machine_name):
+def export_config_file(contract_name, country, config_data, machine_name):
     paths = cfg[machine_name.lower()]
 
     # Machine-specific processing
     if machine_name.lower() == "savio":
         # Assuming 'folders' is already a list of paths
-        image_folders = [os.path.join(paths['images_folder'], os.path.basename(os.path.dirname(x))) + "/" for x in config_data['folders']]
+        image_folders = [os.path.join(paths['images_folder'], country, os.path.basename(os.path.dirname(x))) + "/" for x in config_data['folders']]
     else:  # For 'tabei' and other machines
         image_folders = config_data['folders']  # Already in the correct format
 

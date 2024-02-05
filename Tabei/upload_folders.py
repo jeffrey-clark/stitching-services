@@ -24,93 +24,95 @@ from tqdm import tqdm
 from paramiko import SSHClient
 import getpass
 import subprocess
+from Models.Savio import SavioClient
 
 import Functions.utilities as u
 
 cfg = u.read_config()
-pwd = getpass.getpass("  Enter decryption password: ")
 
 
-# Define a callback function for tqdm
-def tqdm_callback(t):
-    def inner_callback(bytes_transferred, total_bytes):
-        t.update(bytes_transferred - t.n)
-    return inner_callback
+# # Define a callback function for tqdm
+# def tqdm_callback(t):
+#     def inner_callback(bytes_transferred, total_bytes):
+#         t.update(bytes_transferred - t.n)
+#     return inner_callback
 
 
-def upload_to_savio_pattern(source_pattern, country):
-    directories = glob.glob(source_pattern)
-    ssh = SSHClient()
-    ssh.load_system_host_keys()
-    ssh.connect(hostname='dtn.brc.berkeley.edu', username='jeffreyclark', password=u.get_savio_password(pwd))
+# def upload_to_savio_pattern(source_pattern, country):
+#     directories = glob.glob(source_pattern)
+#     ssh = SSHClient()
+#     ssh.load_system_host_keys()
+#     ssh.connect(hostname='dtn.brc.berkeley.edu', username='jeffreyclark', password=u.get_savio_password(pwd))
 
-    with ssh.open_sftp() as sftp:
-        for directory in directories:
-            if os.path.isdir(directory):
-                folder_name = os.path.basename(directory.rstrip('/'))
-                full_dest_path = os.path.join(cfg['images_folder_paths']['savio'], country, folder_name)
-                print(f"Uploading {directory} to {full_dest_path}...")
+#     with ssh.open_sftp() as sftp:
+#         for directory in directories:
+#             if os.path.isdir(directory):
+#                 folder_name = os.path.basename(directory.rstrip('/'))
+#                 full_dest_path = os.path.join(cfg['images_folder_paths']['savio'], country, folder_name)
+#                 print(f"Uploading {directory} to {full_dest_path}...")
                 
-                for file in os.listdir(directory):
-                    local_path = os.path.join(directory, file)
-                    remote_path = os.path.join(full_dest_path, file)
-                    file_size = os.path.getsize(local_path)
+#                 for file in os.listdir(directory):
+#                     local_path = os.path.join(directory, file)
+#                     remote_path = os.path.join(full_dest_path, file)
+#                     file_size = os.path.getsize(local_path)
 
-                    with tqdm(total=file_size, unit='B', unit_scale=True, desc=file) as t:
-                        sftp.put(local_path, remote_path, callback=tqdm_callback(t))
-            else:
-                print(f"Skipping {directory}, not a directory.")
+#                     with tqdm(total=file_size, unit='B', unit_scale=True, desc=file) as t:
+#                         sftp.put(local_path, remote_path, callback=tqdm_callback(t))
+#             else:
+#                 print(f"Skipping {directory}, not a directory.")
 
-    print("Upload complete.")
+#     print("Upload complete.")
 
 
-def upload_to_savio(directories, country):
-    ssh = SSHClient()
-    ssh.load_system_host_keys()
-    ssh.connect(hostname='dtn.brc.berkeley.edu', username='jeffreyclark', password=u.get_savio_password(pwd))
+# def upload_to_savio(directories, country):
+#     ssh = SSHClient()
+#     ssh.load_system_host_keys()
+#     ssh.connect(hostname='dtn.brc.berkeley.edu', username='jeffreyclark', password=u.get_savio_password(pwd))
 
-    with ssh.open_sftp() as sftp:
-        for directory in directories:
-            if os.path.isdir(directory):
-                folder_name = os.path.basename(directory.rstrip('/'))
-                full_dest_path = os.path.join(cfg['images_folder_paths']['savio'], country, folder_name)
-                print(f"Uploading {directory} to {full_dest_path}...")
+#     with ssh.open_sftp() as sftp:
+#         for directory in directories:
+#             if os.path.isdir(directory):
+#                 folder_name = os.path.basename(directory.rstrip('/'))
+#                 full_dest_path = os.path.join(cfg['images_folder_paths']['savio'], country, folder_name)
+#                 print(f"Uploading {directory} to {full_dest_path}...")
                 
-                for file in os.listdir(directory):
-                    local_path = os.path.join(directory, file)
-                    remote_path = os.path.join(full_dest_path, file)
-                    file_size = os.path.getsize(local_path)
+#                 for file in os.listdir(directory):
+#                     local_path = os.path.join(directory, file)
+#                     remote_path = os.path.join(full_dest_path, file)
+#                     file_size = os.path.getsize(local_path)
 
-                    with tqdm(total=file_size, unit='B', unit_scale=True, desc=file) as t:
-                        sftp.put(local_path, remote_path, callback=tqdm_callback(t))
-            else:
-                print(f"Skipping {directory}, not a directory.")
+#                     with tqdm(total=file_size, unit='B', unit_scale=True, desc=file) as t:
+#                         sftp.put(local_path, remote_path, callback=tqdm_callback(t))
+#             else:
+#                 print(f"Skipping {directory}, not a directory.")
 
-    print("Upload complete.")
+#     print("Upload complete.")
 
 
 
-def upload_to_bucket(source_pattern, country):
-    directories = glob.glob(source_pattern)
+# def upload_to_bucket(source_pattern, country):
+#     directories = glob.glob(source_pattern)
 
-    for directory in directories:
-        if os.path.isdir(directory):
-            folder_name = os.path.basename(directory.rstrip('/'))
-            full_dest_path = os.path.join(cfg['images_folder_paths']['google_bucket'], country, folder_name)
+#     for directory in directories:
+#         if os.path.isdir(directory):
+#             folder_name = os.path.basename(directory.rstrip('/'))
+#             full_dest_path = os.path.join(cfg['images_folder_paths']['google_bucket'], country, folder_name)
 
-            print(f"Uploading {directory} to {full_dest_path}...")
-            subprocess.run(["gcloud", "storage", "cp", directory, full_dest_path, "--recursive"])
-        else:
-            print(f"Skipping {directory}, not a directory.")
+#             print(f"Uploading {directory} to {full_dest_path}...")
+#             subprocess.run(["gcloud", "storage", "cp", directory, full_dest_path, "--recursive"])
+#         else:
+#             print(f"Skipping {directory}, not a directory.")
 
-    print("Upload complete.")
+#     print("Upload complete.")
 
 
 
 
 def main(paths, country, machine):
     if machine.lower() == "savio":
-        upload_to_savio(paths, country)
+        s = SavioClient()
+        s.upload_image_folders(paths, country)
+        
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Upload directories to Savio")

@@ -148,8 +148,23 @@ class SavioClient:
     @ensure_connection('ftp')
     def listdir(self, path):
         return [x for x in self.sftp.listdir(path) if not x.startswith('.')]
-
     
+    @ensure_connection('ftp')
+    def makedirs(self, path):
+        """Ensure that a directory exists on the remote server."""
+        # Split the path and filter out empty parts to handle absolute paths
+        dir_parts = [part for part in path.split('/') if part]
+        current_dir = '/'
+
+        for part in dir_parts:
+            current_dir = os.path.join(current_dir, part)
+            try:
+                self.sftp.stat(current_dir)
+            except IOError:
+                print(f"Creating remote directory: {current_dir}")
+                self.sftp.mkdir(current_dir)
+
+                
     @ensure_connection('ftp')
     def upload_files_sftp(self, file_paths, remote_paths):
         try:
@@ -179,7 +194,7 @@ class SavioClient:
             raise e
 
 
-    def upload_image_folders(self, source_pattern, country):
+    def upload_image_folders_pattern(self, source_pattern, country):
         directories = glob.glob(source_pattern)
         for directory in directories:
             if os.path.isdir(directory):
@@ -193,7 +208,24 @@ class SavioClient:
             else:
                 print(f"Skipping {directory}, not a directory.")
 
+    @ensure_connection('ftp')
+    def upload_image_folders(self, directories, country):
+        for directory in directories:
+            if os.path.isdir(directory):
+                folder_name = os.path.basename(directory.rstrip('/'))
+                full_dest_path = os.path.join(cfg['savio']['images_folder'], country, folder_name)
 
+                # Ensure the remote directory exists
+                self.makedirs(full_dest_path)
+
+                file_paths = [os.path.join(directory, file) for file in os.listdir(directory)]
+                remote_paths = [os.path.join(full_dest_path, file) for file in os.listdir(directory)]
+
+                self.upload_files_sftp(file_paths, remote_paths)
+            else:
+                print(f"Skipping {directory}, not a directory.")
+
+        print("Upload complete.")
     
 
 if __name__ == "__main__":

@@ -288,7 +288,7 @@ class ConfigCollection(GoogleSheet):
         print(f"Contract '{contract_name}' added.")
 
 
-    def export_config(self, contract_name, machine_name):
+    def export_config(self, contract_name, country, machine_name):
         # Retrieve configuration data for the specified contract
         row_id = self.find_contract_row(contract_name)
         if row_id is None:
@@ -311,7 +311,7 @@ class ConfigCollection(GoogleSheet):
             config_data[key] = value
 
         # Continue with the export function
-        return export_config_file(contract_name, config_data, machine_name)
+        return export_config_file(contract_name, country, config_data, machine_name)
 
 
 
