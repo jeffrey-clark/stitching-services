@@ -34,7 +34,12 @@ import Functions.utilities as u
 
 # Load configuration
 cfg = u.read_config()
-pwd = getpass.getpass("  Enter Tabei decryption password: ")
+
+# Try to get the password from an environment variable (used on Tabei file uploads)
+pwd = os.getenv('TABEI_DECRYPTION_PASSWORD')
+
+if not pwd:
+    pwd = getpass.getpass("  Enter Tabei decryption password: ")
 
 
 # Define the tqdm callback function
@@ -57,7 +62,7 @@ def ensure_connection(host_type="shell", verbose=False):
             if not was_connected or should_reconnect:
                 if was_connected and _verbose:
                     print(f"Conflicting host type, closing {self.host_type}, and opening {host_type}")
-                self.close()
+                    self.close()
                 self.connect(host_type)
                 self.connected = True
             else:
@@ -72,6 +77,7 @@ def ensure_connection(host_type="shell", verbose=False):
                     self.connected = False
         return wrapper
     return decorator
+
 
 class TabeiClient:
     def __init__(self):
@@ -131,8 +137,15 @@ class TabeiClient:
         output = stdout.read().decode('utf-8')
         error = stderr.read().decode('utf-8')
         if error:
-            print("Error:", error)
+            raise Exception("SSH Command Error: " + error)
         return output
+    
+    @ensure_connection('shell')
+    def _execute_command_allow_error(self, command):
+        stdin, stdout, stderr = self.ssh.exec_command(command)
+        output = stdout.read().decode('utf-8')
+        error = stderr.read().decode('utf-8')
+        return output, error
     
     @ensure_connection('ftp')
     def listdir(self, path):
@@ -218,14 +231,19 @@ class TabeiClient:
         else:
             print(f"Started tmux session '{session_name}' with command: {command}")
 
+
     @ensure_connection('shell')
     def list_tmux_sessions(self):
-        output = self.execute_command("tmux list-sessions")
-        
-        # if there are no tmux sessions running it will return a string starting with error
-        if "error" in output.lower()[:10]:
+        output, error = self._execute_command_allow_error("tmux list-sessions")
+
+        # Handle the case where no tmux sessions are running
+        if error and "no server running" in error.lower():
+            # If the error is specifically about no tmux sessions, return None without printing the error
             return None
-        
+        elif error:
+            # If there's some other error, print it
+            print("Error:", error)
+
         return output
 
     

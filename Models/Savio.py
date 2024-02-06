@@ -44,7 +44,9 @@ def tqdm_callback(t):
     return inner_callback
 
 
-def ensure_connection(host_type="shell", verbose=True):
+# Decorator function to ensure connection for SavioClient methods
+# as I understand it only works for shell scripts
+def ensure_connection(host_type="shell", verbose=False):
     def decorator(func):
         def wrapper(self, *args, **kwargs):
             _verbose = verbose  # Use the verbose setting provided to the decorator
@@ -55,7 +57,7 @@ def ensure_connection(host_type="shell", verbose=True):
             if not was_connected or should_reconnect:
                 if was_connected and _verbose:
                     print(f"Conflicting host type, closing {self.host_type}, and opening {host_type}")
-                self.close()
+                    self.close()
                 self.connect(host_type)
                 self.connected = True
             else:
