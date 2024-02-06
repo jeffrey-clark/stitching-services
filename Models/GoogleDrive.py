@@ -180,7 +180,7 @@ config_columns = [
             'raster_edge_constraint_type'
         ]
 
-class ConfigCollection(GoogleSheet):
+class ConfigSheet(GoogleSheet):
     def __init__(self, spreadsheet_id, sheet_name):
         super().__init__(spreadsheet_id)
         self.sheet_name = sheet_name
@@ -316,6 +316,196 @@ class ConfigCollection(GoogleSheet):
 
 
 
+status_columns = ['contract_name', 'machine', 'user', 'image_upload', 'cropping']
+
+class StatusSheet(GoogleSheet):
+    def __init__(self, spreadsheet_id, sheet_name):
+        super().__init__(spreadsheet_id)
+        self.sheet_name = sheet_name
+        self.worksheet = self.get_worksheet(sheet_name)
+        if not self.worksheet:
+            print(f"Initialization failed: Worksheet '{sheet_name}' not found.")
+            return
+
+        self.initialize_columns()
+
+    def initialize_columns(self):
+        # Check if the first row is empty (assuming if first cell is empty, the row is empty)
+        if not self.worksheet.cell(1, 1).value:
+            # Populate the first row with status_columns
+            cell_list = self.worksheet.range(1, 1, 1, len(status_columns))
+            for i, cell in enumerate(cell_list):
+                cell.value = status_columns[i]
+            self.worksheet.update_cells(cell_list)
+            print("Column initialization complete.")
+        else:
+            print("Sheet already has data. Column initialization skipped.")
+
+    def find_contract_row(self, contract_name, machine, user):
+        try:
+            data = self.worksheet.get_all_values()
+            for idx, row in enumerate(data):
+                if row[0] == contract_name and row[1] == machine and row[2] == user:
+                    return idx + 1  # +1 because spreadsheet rows are 1-indexed
+            return None
+        except Exception as e:
+            print(f"Error finding contract row: {e}")
+            raise
+
+    def contract_exists(self, contract_name, machine, user):
+        return self.find_contract_row(contract_name, machine, user) is not None
+
+    def add_contract(self, contract_name, machine, user):
+        if self.contract_exists(contract_name, machine, user):
+            print(f"Contract '{contract_name}' already exists. Not adding.")
+            return
+
+        # Assuming 'contract', 'machine', 'user' are the first three columns
+        new_row_values = [contract_name, machine, user] + [''] * (len(self.worksheet.row_values(1)) - 3)
+        self.worksheet.append_row(new_row_values)
+        print(f"Contract '{contract_name}' added with machine '{machine}' and user '{user}'.")
+
+
+    def update_status(self, contract_name, machine, user, column_name, status):
+        row_index = self.find_contract_row(contract_name, machine, user)
+        
+        if row_index is None:
+            self.add_contract(contract_name, machine, user)
+            row_index = self.find_contract_row(contract_name, machine, user)
+
+        try:
+            col_index = self.worksheet.row_values(1).index(column_name) + 1  # +1 for 1-indexed columns
+            self.update_cell(self.worksheet, row_index, col_index, status)
+            print(f"Status '{status}' updated for '{contract_name}' in column '{column_name}'.")
+        except ValueError:
+            print(f"Column '{column_name}' not found.")
+        except Exception as e:
+            print(f"Error updating status: {e}")
+            raise
+
+    def update_status_multiple(self, contract_name, machine, user, status_updates):
+        """
+        Updates multiple statuses for a given contract_name, machine, and user.
+
+        :param contract_name: The contract name
+        :param machine: The machine name
+        :param user: The user name
+        :param status_updates: A dictionary where keys are column names and values are statuses
+        """
+        row_index = self.find_contract_row(contract_name, machine, user)
+        
+        if row_index is None:
+            self.add_contract(contract_name, machine, user)
+            row_index = self.find_contract_row(contract_name, machine, user)
+
+        try:
+            for column_name, status in status_updates.items():
+                col_index = self.worksheet.row_values(1).index(column_name) + 1  # +1 for 1-indexed columns
+                self.update_cell(self.worksheet, row_index, col_index, status)
+            print(f"Statuses updated for '{contract_name}'.")
+        except ValueError as e:
+            print(f"Column not found: {e}")
+        except Exception as e:
+            print(f"Error updating statuses: {e}")
+            raise
+
+
+    def get_full_status(self, contract_name, machine, user):
+        """
+        Retrieves the entire status row for a given contract, machine, and user.
+
+        :param contract_name: The contract name
+        :param machine: The machine name
+        :param user: The user name
+        :return: A dictionary with column names as keys and the corresponding statuses as values
+        """
+        row_index = self.find_contract_row(contract_name, machine, user)
+        if row_index is None:
+            print(f"Contract '{contract_name}' not found.")
+            return None
+
+        try:
+            row_values = self.worksheet.row_values(row_index)
+            column_names = self.worksheet.row_values(1)
+            status_dict = dict(zip(column_names, row_values))
+
+            # Ensure all status_columns are included
+            for col in status_columns:
+                if col not in status_dict:
+                    status_dict[col] = None
+
+            return status_dict
+        except Exception as e:
+            print(f"Error retrieving status: {e}")
+            return None
+        
+
+    def get_status(self, contract_name, machine, user, column_name):
+        """
+        Retrieves the status from a single column for a given contract, machine, and user.
+
+        :param contract_name: The contract name
+        :param machine: The machine name
+        :param user: The user name
+        :param column_name: The name of the column from which to retrieve the status
+        :return: The status from the specified column, or None if not found
+        """
+        row_index = self.find_contract_row(contract_name, machine, user)
+        if row_index is None:
+            print(f"Contract '{contract_name}' not found.")
+            return None
+
+        try:
+            column_names = self.worksheet.row_values(1)
+            if column_name not in column_names:
+                print(f"Column '{column_name}' not found.")
+                return None
+
+            col_index = column_names.index(column_name) + 1  # +1 for 1-indexed columns
+            return self.read_cell(self.worksheet, row_index, col_index)
+        except Exception as e:
+            print(f"Error retrieving status from column '{column_name}': {e}")
+            return None
+
+
+
+
+class Status:
+    def __init__(self, status_sheet, contract_name, machine, user):
+        self.status_sheet = status_sheet
+        self.contract_name = contract_name
+        self.machine = machine
+        self.user = user
+
+    def refresh_status(self):
+        """
+        Refreshes the status data from the StatusSheet.
+        """
+        return self.status_sheet.get_full_status(self.contract_name, self.machine, self.user)
+
+    def get_status(self, column_name=None):
+        """
+        Gets the status for the specified column or the entire status if no column is specified.
+        """
+        if column_name:
+            return self.status_sheet.get_status(self.contract_name, self.machine, self.user, column_name)
+        else:
+            return self.refresh_status()
+
+    def update_status(self, column_name, status):
+        """
+        Updates the status for a specified column.
+        """
+        self.status_sheet.update_status(self.contract_name, self.machine, self.user, column_name, status)
+        # self.refresh_status()  # Refresh the status data after update
+
+    def update_status_multiple(self, status_updates):
+        """
+        Updates multiple statuses.
+        """
+        self.status_sheet.update_status_multiple(self.contract_name, self.machine, self.user, status_updates)
+        # self.refresh_status()  # Refresh the status data after updates
+
 
 
 
@@ -330,9 +520,15 @@ if __name__ == "__main__":
 
     # work with the config files google sheet
     spreadsheet_id = cfg['google_drive']['config_files']['id']
+    
     sheet_name = 'config'  # Replace with your actual sheet name
+    all_configs = ConfigSheet(spreadsheet_id, sheet_name)
 
-    all_configs = ConfigCollection(spreadsheet_id, sheet_name)
+
+    sheet_name = 'status'
+    status_sheet = StatusSheet(spreadsheet_id, sheet_name)
+    status = Status(status_sheet, 'my contract', 'savio', 'jeffreyclark')
+    print(status.get_status())
 
     # # Example: Get value from column 2
     # value = config.get_config_value(2)

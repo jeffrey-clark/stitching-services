@@ -1,5 +1,5 @@
 from Models.Contract import Country
-from Models.GoogleDrive import ConfigCollection
+from Models.GoogleDrive import ConfigSheet, StatusSheet, Status
 from Functions.contract_utils import generate_default_config_data
 import Functions.utilities as u
 from Functions.shell_utils import generate_shell_script
@@ -8,10 +8,12 @@ from Models.Tabei import TabeiClient
 import os
 import sys
 from tqdm import tqdm
+import time
 
 
 cfg = u.read_config()
-config_db = ConfigCollection(cfg['google_drive']['config_files']['id'], "config")
+config_db = ConfigSheet(cfg['google_drive']['config_files']['id'], "config")
+status_db = StatusSheet(cfg['google_drive']['config_files']['id'], "status")
 
 
 def compare_folder_tabei_savio(folders, t, s):
@@ -93,6 +95,12 @@ def main(machine, country, contract_name, contract_alias=None):
     if contract_alias is None:
         contract_alias = contract_name
 
+    # load in the status object as contract_status
+    exists = status_db.contract_exists(contract_name, machine, cfg['savio']['username'])
+    if not exists:
+        status_db.add_contract(contract_name, machine, cfg['savio']['username'])
+    contract_status = Status(status_db, contract_name, machine, cfg['savio']['username'])
+
     # Load the contract from Data Overview file.
     country_contracts = Country(country, refresh=False)
 
@@ -108,18 +116,20 @@ def main(machine, country, contract_name, contract_alias=None):
     
 
     # ----- upload the files from Tabei to Machine -----
+    if contract_status.get_status()['image_upload'] != "Done":
+        t = TabeiClient()
+        s = SavioClient()
 
-    t = TabeiClient()
-    s = SavioClient()
+        folders = my_contract.df.path.to_list()
 
-    folders = my_contract.df.path.to_list()
+        # add a quick skip from google sheet if we know uploads went well. 
+        t.connect('shell')
+        upload_status = upload_images_savio(contract_alias, folders, t, s)
+        t.close()
+        if upload_status != "Complete":
+            raise ValueError(upload_status)
 
-    # add a quick skip from google sheet if we know uploads went well. 
-    t.connect('shell')
-    upload_status = upload_images_savio(contract_alias, folders, t, s)
-    t.close()
-    if upload_status != "Complete":
-        raise ValueError(upload_status)
+        contract_status.update_status('image_upload', "Done")
 
 
     print("we made it here")
