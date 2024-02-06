@@ -170,7 +170,9 @@ def config_format(config_data):
         ("optim_lr_xy", False),
         ("", False),
         ("raster_edge_size", False),
-        ("raster_edge_constraint_type", False)
+        ("raster_edge_constraint_type", False),
+        ("", False),
+        ("collection_regex", True),
     ]
 
     yaml_lines = []
@@ -225,13 +227,13 @@ def export_config_file(contract_name, country, config_data, machine_name):
     config_data.update(machine_specific_data)
 
     # Specify the file path for the YAML file
-    output_file_path = os.path.join("Files/config_files", f"{contract_name}.yaml")
+    output_file_path = os.path.join("Files/config_files", f"{contract_name}.yml")
 
      # Serialize config_data using the custom format function
     custom_yaml_content = config_format(config_data)
 
     # Write the custom YAML content to file
-    output_file_path = os.path.join("Files/config_files", f"{contract_name}.yaml")
+    output_file_path = os.path.join("Files/config_files", f"{contract_name}.yml")
     with open(output_file_path, 'w') as file:
         file.write(custom_yaml_content)
 

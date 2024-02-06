@@ -9,6 +9,9 @@ import os
 import sys
 from tqdm import tqdm
 import time
+import re
+
+from Functions.automation_utils import upload_images_savio
 
 
 cfg = u.read_config()
@@ -16,81 +19,10 @@ config_db = ConfigSheet(cfg['google_drive']['config_files']['id'], "config")
 status_db = StatusSheet(cfg['google_drive']['config_files']['id'], "status")
 
 
-def compare_folder_tabei_savio(folders, t, s):
-    print("  Fetching filesizes from Tabei:")
-    tabei_sizes = t.get_folder_total_sizes(folders)
-
-    print("  Fetching filesizes from Savio:")
-    savio_directory_mappings = s.convert_to_savio_paths(folders, country)
-    savio_paths = [savio_path for _, savio_path in savio_directory_mappings]
-    savio_sizes = s.get_folder_total_sizes(savio_paths)
-
-    mismatched_folders = []
-
-    for tabei_key, savio_key in savio_directory_mappings:
-        tabei_size = tabei_sizes.get(tabei_key)
-        savio_size = savio_sizes.get(savio_key)
-
-        # Comparing sizes with a tolerance of 0.1%
-        if tabei_size is not None and savio_size is not None:
-            size_difference = abs(tabei_size - savio_size)
-            allowed_difference = 0.001 * max(tabei_size, savio_size)  # 0.1% of the larger size
-
-            if size_difference > allowed_difference:
-                mismatched_folders.append({
-                    "tabei_key": tabei_key,
-                    "tabei_size": tabei_size,
-                    "savio_key": savio_key,
-                    "savio_size": savio_size,
-                    "difference": size_difference
-                })
-        else:
-            mismatched_folders.append({
-                "tabei_key": tabei_key,
-                "savio_key": savio_key,
-                "issue": "Missing size information"
-            })
-
-    if mismatched_folders:
-        print("There are mismatched folders.")
-        return mismatched_folders
-    else:
-        print("All folder sizes match within tolerance.")
-        return []
-
-
-def upload_images_savio(contract_alias, folders, t, s):
-
-    tmux_name = f"{contract_alias}_upload"  # set the tmux name
-    
-    # first check if there is a tmux session going
-    tmux_sessions_response = t.list_tmux_sessions()
-    if tmux_sessions_response is not None:
-        if tmux_name in tmux_sessions_response:
-            return "Upload is still ongoing. Please wait until complete."
-            # print("Upload is still ongoing. Please wait until complete.")
-
-    # if uploads are complete, we do filesize comparisons to verify correct upload
-    mismatched_folders_detailed = compare_folder_tabei_savio(folders, t, s)
-    mismatched_folders = [x['tabei_key'] for x in mismatched_folders_detailed]
-
-    if len(mismatched_folders) > 0:
-        # prepare the tmux upload command
-        env_interpreter = os.path.join(cfg['tabei']['conda_env'], "bin", "python")
-        cmd_path = os.path.join(cfg['tabei']['stitching-services'], "Tabei/upload_folders.py") 
-        folder_string = " ".join(mismatched_folders)
-        set_password = f"export SAVIO_DECRYPTION_PASSWORD={pwd}"  # need to send the password for SavioClient decryption.
-        command = f"{set_password} && {env_interpreter} {cmd_path} --paths {folder_string} --country {country} --machine Savio"
-
-        # send the command to upload
-        t.send_tmux_command(f"{contract_alias}_upload", command)
-
-        return "Images are being uploaded. Please wait until complete."
-            
-    return "Complete"
-
 
 def main(machine, country, contract_name, contract_alias=None):
+
+    # ----- Initialization -----
 
     if contract_alias is None:
         contract_alias = contract_name
@@ -107,15 +39,9 @@ def main(machine, country, contract_name, contract_alias=None):
     # get the specific contract of interest
     my_contract = country_contracts.get_contract(contract_name)
 
-    # Now let us upload and or fetch configuration for the contract
-    config_data = generate_default_config_data(my_contract.df)
-    config_db.add_contract(contract_alias, config_data)
-    
-    # export the contract for savio
-    config_fp = config_db.export_config(contract_alias, country, machine)
-    
 
     # ----- upload the files from Tabei to Machine -----
+
     if contract_status.get_status()['image_upload'] != "Done":
         t = TabeiClient()
         s = SavioClient()
@@ -124,7 +50,7 @@ def main(machine, country, contract_name, contract_alias=None):
 
         # add a quick skip from google sheet if we know uploads went well. 
         t.connect('shell')
-        upload_status = upload_images_savio(contract_alias, folders, t, s)
+        upload_status = upload_images_savio(contract_alias, folders, country, pwd, t, s)
         t.close()
         if upload_status != "Complete":
             raise ValueError(upload_status)
@@ -132,32 +58,67 @@ def main(machine, country, contract_name, contract_alias=None):
         contract_status.update_status('image_upload', "Done")
 
 
-    print("we made it here")
+    # ----- verify the regex path
+    if contract_status.get_status()['regex_test'] != "Done":
+            
+        # we need to get all filepaths
+        s = SavioClient()
+        folders = my_contract.df.path.to_list()
+        savio_directory_mappings = s.convert_to_savio_paths(folders, country)
+        savio_folders = [savio_path for _, savio_path in savio_directory_mappings]
+        fps = s.get_filepaths_in_folders(savio_folders)
+
+        # check for a custom regex pattern in the config sheet
+        contract_cfg = config_db.get_config(contract_alias)
+        regex_pattern = '^(?P<prefix>.*)_(?P<idx0>.*)_(?P<idx1>.*).(jpg|tif)'
+        if "collection_regex" in contract_cfg.keys():
+            if contract_cfg['collection_regex'] != None:
+                regex_pattern = contract_cfg['collection_regex']
+
+        p = re.compile(regex_pattern)
+        failed_fps = []
+        for fp in fps:
+            file = os.path.basename(fp)
+            if file.lower().startswith('job sheet'):
+                continue
+            if ((file.endswith('.jpg') or file.endswith('.tif'))
+                        and not file.startswith('._')):
+                m = p.search(file)
+                try:
+                    new_idx0 = int(m['idx0'])
+                    new_idx1 = int(m['idx1'])
+                except:
+                    failed_fps.append(fp)
+            else:
+                failed_fps.append(fp)
+
+        if len(failed_fps) > 0:
+            contract_status.update_status('regex_test', f"Failed: {failed_fps[0:2]}")
+            raise ValueError("Images need custom regex. Update config file.")
+
+        contract_status.update_status('regex_test', f"Done")
 
 
-
-
-
-
-
-
- 
+    # ---- upload and execute the initialize and cropping script
     
-    # -------------------------------------------------
+    if contract_status.get_status()['cropping'] != "Done":
 
-    # config_fp_remote = os.path.join(cfg[machine]['config_folder'], os.path.basename(config_fp))
-    # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+        # Now let us generate a default conifg and upload of not alreay exists
+        config_data = generate_default_config_data(my_contract.df)
+        config_db.add_contract(contract_alias, config_data)
+        
+        # export the contract for savio
+        config_fp = config_db.export_config(contract_alias, country, machine)
+        shell_fp = generate_shell_script(contract_alias, machine, 1)
 
+        config_fp_remote = os.path.join(cfg[machine]['config_folder'], os.path.basename(config_fp))
+        shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
 
-    # s = SavioClient()
-    # s.upload_files_sftp([config_fp, shell_fp], [config_fp_remote, shell_fp_remote])
+        s = SavioClient()
+        s.upload_files_sftp([config_fp, shell_fp], [config_fp_remote, shell_fp_remote])
 
-    # s.upload_files_sftp()
-
-
-    # send execution command
-
-
+        # send execution command
+        # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
 
 
 

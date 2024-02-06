@@ -35,6 +35,7 @@ pwd = os.getenv('SAVIO_DECRYPTION_PASSWORD')
 
 if not pwd:
     pwd = getpass.getpass("  Enter Savio decryption password: ")
+    os.environ['SAVIO_DECRYPTION_PASSWORD'] = pwd
 
 
 # Define the tqdm callback function
@@ -135,7 +136,9 @@ class SavioClient:
 
 
     @ensure_connection('shell')
-    def execute_command(self, command):
+    def execute_command(self, command, directory=None):
+        if directory:
+            command = f"cd {directory} && {command}"
         stdin, stdout, stderr = self.ssh.exec_command(command)
         output = stdout.read().decode('utf-8')
         error = stderr.read().decode('utf-8')
@@ -248,6 +251,24 @@ class SavioClient:
             self.upload_files_sftp(file_paths, remote_paths)
 
         print("Upload complete.")
+
+    @ensure_connection('ftp')
+    def get_filepaths_in_folders(self, folder_paths):
+        """
+        Returns the file sizes of all files within the specified folders.
+
+        :param folder_paths: List of paths to the folders
+        :return: Dictionary where keys are folder paths and values are lists of tuples (file name, file size)
+        """
+        filepaths = []
+        for folder_path in folder_paths:
+            try:
+                files = self.sftp.listdir(folder_path)
+                fps = [os.path.join(folder_path, x) for x in files]
+                filepaths.extend(fps)
+            except Exception as e:
+                print(f"An error occurred while accessing {folder_path}: {e}")
+        return filepaths
     
     @ensure_connection('ftp')
     def get_file_sizes_in_folders(self, folder_paths):

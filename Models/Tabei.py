@@ -40,6 +40,7 @@ pwd = os.getenv('TABEI_DECRYPTION_PASSWORD')
 
 if not pwd:
     pwd = getpass.getpass("  Enter Tabei decryption password: ")
+    os.environ['TABEI_DECRYPTION_PASSWORD'] = pwd
 
 
 # Define the tqdm callback function

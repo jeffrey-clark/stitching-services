@@ -8,4 +8,11 @@ dependencies:
   - scp
   - pyyaml
   - tqdm
+  - pandas
+  - google-auth
+  - google-auth-oauthlib
+  - pyarrow
+  - pydrive
+  - openpyxl
+  - gspread
 prefix: /Users/jeffrey/miniconda3/envs/stitch-service

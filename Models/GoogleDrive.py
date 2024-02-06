@@ -177,7 +177,7 @@ config_columns = [
             'artifact_angle_threshold', 'soft_break_threshold', 'soft_individual_threshold',
             'optim_inclusion_threshold', 'n_within', 'n_across', 'n_swath_neighbors', 'retry_threshold',
             'n_iter', 'optim_lr_theta', 'optim_lr_scale', 'optim_lr_xy', 'raster_edge_size',
-            'raster_edge_constraint_type'
+            'raster_edge_constraint_type', 'regex_test'
         ]
 
 class ConfigSheet(GoogleSheet):
@@ -288,7 +288,7 @@ class ConfigSheet(GoogleSheet):
         print(f"Contract '{contract_name}' added.")
 
 
-    def export_config(self, contract_name, country, machine_name):
+    def get_config(self, contract_name):
         # Retrieve configuration data for the specified contract
         row_id = self.find_contract_row(contract_name)
         if row_id is None:
@@ -302,7 +302,10 @@ class ConfigSheet(GoogleSheet):
         # Deserialize and convert row data to a dictionary
         config_data = {}
         for i, key in enumerate(column_headers):
-            value = deserialize_from_google_sheet(contract_data[i])
+            try:
+                value = deserialize_from_google_sheet(contract_data[i])
+            except:
+                value = None
             # Explicitly convert 'True'/'False' strings to boolean values
             if value == 'True':
                 value = True
@@ -310,13 +313,17 @@ class ConfigSheet(GoogleSheet):
                 value = False
             config_data[key] = value
 
-        # Continue with the export function
+        return config_data
+    
+
+    def export_config(self, contract_name, country, machine_name):
+        config_data = self.get_config(contract_name)
         return export_config_file(contract_name, country, config_data, machine_name)
 
 
 
 
-status_columns = ['contract_name', 'machine', 'user', 'image_upload', 'cropping']
+status_columns = ['contract_name', 'machine', 'user', 'image_upload', 'cropping', 'regex_test']
 
 class StatusSheet(GoogleSheet):
     def __init__(self, spreadsheet_id, sheet_name):
