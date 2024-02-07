@@ -59,3 +59,33 @@ def get_savio_password(pwd):
     savio_hotp = decrypt_message(savio_hotp_enc, pwd)
     p = f"{savio_pin}{get_totp_token(savio_hotp)}"
     return p
+
+
+def translate_filepaths(fps):
+    """ 
+    Ensures that you access the correct Tabei Filepaths from Shackleton or Kupe
+    """
+    allowed_hostnames = ["tabei", "shackleton", "kupe"]
+    hostname = socket.gethostname()
+    instance_type = type(fps)
+    
+    if hostname not in allowed_hostnames:
+        raise ValueError(f"Unsupported hostname. Supported hostnames are {', '.join(allowed_hostnames)}.")
+
+    if isinstance(fps, str):
+        fps = [fps]
+
+    output_filepaths = []
+    for fp in fps:
+        if hostname == "tabei":
+            output_filepaths.append(fp)
+        else:
+            # if the fp starts with /mnt/shackleton_shares/... change to /shares/... 
+            if fp.startswith(f"/mnt/{hostname}_shares/"):
+                fp = fp.replace(f"/mnt/{hostname}_shares/", "/shares/")
+            # if the fp starts with /shares/... change to /mnt/tabei_shares/...
+            elif fp.startswith("/shares/"):
+                fp = fp.replace("/shares/", "/mnt/tabei_shares/")          
+            output_filepaths.append(fp)
+
+    return output_filepaths[0] if instance_type == str else output_filepaths

@@ -34,7 +34,7 @@ cfg = u.read_config()
 class GoogleDriveService:
     def __init__(self):
         self._SCOPES = ['https://www.googleapis.com/auth/drive']
-        self._credential_path = os.path.join(root_dir, 'config', 'google_service.json')
+        self._credential_path = os.path.join(root_dir, 'Config', 'google_service.json')
 
     def build(self):
         creds = Credentials.from_service_account_file(self._credential_path, scopes=self._SCOPES)
