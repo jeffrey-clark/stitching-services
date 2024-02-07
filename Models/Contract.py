@@ -52,7 +52,8 @@ def read_country_sheet(sheet_name):
     try:
         df = pd.read_excel(do['path'], sheet_name=sheet_name)
         # remove the extra index column
-        df = df.drop(columns=['Unnamed: 0'])
+        if 'Unnamed: 0' in df.columns:
+            df = df.drop(columns=['Unnamed: 0'])
         return df
     except Exception as e:
         print(f"Error reading data overview: {e}")
