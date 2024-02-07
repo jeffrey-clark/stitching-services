@@ -29,6 +29,7 @@ import paramiko
 import time
 import glob
 import io
+import stat
 
 import Functions.utilities as u
 
@@ -132,17 +133,33 @@ class TabeiClient:
 
 
 
+    # @ensure_connection('shell')
+    # def execute_command(self, command):
+    #     stdin, stdout, stderr = self.ssh.exec_command(command)
+    #     output = stdout.read().decode('utf-8')
+    #     error = stderr.read().decode('utf-8')
+    #     if error:
+    #         raise Exception("SSH Command Error: " + error)
+    #     return output
+    
     @ensure_connection('shell')
-    def execute_command(self, command):
+    def execute_command(self, command, directory=None, ignore_error=False):
+        if directory:
+            command = f"cd {directory} && {command}"
         stdin, stdout, stderr = self.ssh.exec_command(command)
         output = stdout.read().decode('utf-8')
         error = stderr.read().decode('utf-8')
-        if error:
-            raise Exception("SSH Command Error: " + error)
+        exit_status = stdout.channel.recv_exit_status()  # Get the exit status
+
+        if exit_status != 0 and not ignore_error:
+            error_message = f"Error executing command: {error}"
+            print(error_message)
+            raise Exception(error_message)
+
         return output
     
     @ensure_connection('shell')
-    def _execute_command_allow_error(self, command):
+    def _execute_command_capture_error(self, command):
         stdin, stdout, stderr = self.ssh.exec_command(command)
         output = stdout.read().decode('utf-8')
         error = stderr.read().decode('utf-8')
@@ -179,6 +196,49 @@ class TabeiClient:
         except Exception as e:
             print(f"An error occurred during file download: {e}")
             raise e
+        
+    @ensure_connection('ftp')
+    def download_directory(self, remote_directory, local_destination):
+        """
+        Download a single remote directory to a local destination.
+        """
+        self._download_directory_recursive(remote_directory, local_destination)
+
+    @ensure_connection('ftp')
+    def download_multiple_directories(self, directories, local_destination):
+        """
+        Download multiple remote directories to a local destination.
+        """
+        for directory in directories:
+            self._download_directory_recursive(directory, local_destination)
+
+    def _download_directory_recursive(self, remote_directory, local_destination):
+        # Ensure the local directory exists
+        local_dir = os.path.join(local_destination, os.path.basename(remote_directory))
+        os.makedirs(local_dir, exist_ok=True)
+
+        for item in self.sftp.listdir(remote_directory):
+            remote_path = os.path.join(remote_directory, item)
+            local_path = os.path.join(local_dir, item)
+
+            if self.is_directory(remote_path):
+                # Recursive call for directories
+                self._download_directory_recursive(remote_path, local_destination)
+            else:
+                # Download file
+                self.download_files_sftp([remote_path], [local_path])
+
+    @ensure_connection('ftp')
+    def is_directory(self, path):
+        """
+        Check if a given remote path is a directory.
+        """
+        try:
+            mode = self.sftp.stat(path).st_mode
+            return stat.S_ISDIR(mode)
+        except IOError:
+            # The path doesn't exist or is inaccessible
+            return False
         
     @ensure_connection('ftp')
     def get_file_sizes_in_folders(self, folder_paths):
@@ -235,7 +295,7 @@ class TabeiClient:
 
     @ensure_connection('shell')
     def list_tmux_sessions(self):
-        output, error = self._execute_command_allow_error("tmux list-sessions")
+        output, error = self._execute_command_capture_error("tmux list-sessions")
 
         # Handle the case where no tmux sessions are running
         if error and "no server running" in error.lower():

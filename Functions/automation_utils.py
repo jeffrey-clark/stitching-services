@@ -61,7 +61,7 @@ def upload_images_savio(contract_alias, folders, country, pwd, t, s):
             return "Upload is still ongoing. Please wait until complete."
             # print("Upload is still ongoing. Please wait until complete.")
 
-    # if uploads are complete, we do filesize comparisons to verify correct upload
+    # if there is no tmux session, we do filesize comparisons to verify correct upload
     mismatched_folders_detailed = compare_folder_tabei_savio(folders, country, t, s)
     mismatched_folders = [x['tabei_key'] for x in mismatched_folders_detailed]
 
