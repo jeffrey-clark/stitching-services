@@ -28,6 +28,7 @@ import zipfile
 Image.MAX_IMAGE_PIXELS = None
 from tqdm import tqdm
 import argparse
+import pandas as pd
 
 
 
@@ -64,24 +65,39 @@ def make_thumbnails(country, contract_name):
             os.mkdir(d)
 
     thumbnail_files = []
+    image_shapes = []
     with tqdm(total=len(sample_fps), desc="Creating Thumbnails") as pbar:
         for fp in sample_fps:
-            image = Image.open(fp).resize((500, 500))
-            output_fp = os.path.join(output_dir, os.path.basename(fp))
-            # Convert to jpg filepath
-            base_name, _ = os.path.splitext(output_fp)
-            output_fp_jpg = base_name + ".jpg"
-            image.save(output_fp_jpg, quality=50, compression="tiff_deflate")
-            image.close()
-            thumbnail_files.append(output_fp_jpg)
+            with Image.open(fp) as img:
+                original_shape = img.size
+                # Resize while maintaining aspect ratio
+                img.thumbnail((500, 500))
+                thumbnail_shape = img.size
 
-            pbar.update(1)  # Update progress bar per file
+                output_fp = os.path.join(output_dir, os.path.basename(fp))
+                base_name, _ = os.path.splitext(output_fp)
+                output_fp_jpg = base_name + ".jpg"
 
-    # Zipping the thumbnails
+                img.save(output_fp_jpg, quality=50, compression="tiff_deflate")
+
+                thumbnail_files.append(output_fp_jpg)
+                image_shapes.append({'original_shape': original_shape, 'thumbnail_shape': thumbnail_shape, 'file_path': fp})
+
+                pbar.update(1)
+
+    # Create DataFrame from image_shapes
+    df = pd.DataFrame(image_shapes)
+
+     # Zipping the thumbnails and DataFrame
     zip_filename = os.path.join(output_dir, "thumbnails.zip")
     with zipfile.ZipFile(zip_filename, 'w') as zipf:
         for file in thumbnail_files:
             zipf.write(file, os.path.basename(file))
+        # Add DataFrame as a CSV to the zip
+        df_csv_path = os.path.join(output_dir, "image_shapes.csv")
+        df.to_csv(df_csv_path, index=False)
+        zipf.write(df_csv_path, os.path.basename(df_csv_path))
+
     print(f"Thumbnails zipped in {zip_filename}")
 
 
