@@ -177,7 +177,7 @@ config_columns = [
             'artifact_angle_threshold', 'soft_break_threshold', 'soft_individual_threshold',
             'optim_inclusion_threshold', 'n_within', 'n_across', 'n_swath_neighbors', 'retry_threshold',
             'n_iter', 'optim_lr_theta', 'optim_lr_scale', 'optim_lr_xy', 'raster_edge_size',
-            'raster_edge_constraint_type', 'regex_test'
+            'raster_edge_constraint_type', 'collection_regex'
         ]
 
 class ConfigSheet(GoogleSheet):
@@ -323,7 +323,9 @@ class ConfigSheet(GoogleSheet):
 
 
 
-status_columns = ['contract_name', 'machine', 'user', 'image_upload' 'regex_test', 'thumbnails', 'crop_params']
+status_columns = ['contract_name', 'machine', 'user', 'image_upload' 'regex_test', 'thumbnails', 'crop_params',
+                  'init_and_crop', 'download_cropping_sample', 'featurize',	'swath_breaks',	'download_swaths',	
+                  'stitch_across']
 
 class StatusSheet(GoogleSheet):
     def __init__(self, spreadsheet_id, sheet_name):

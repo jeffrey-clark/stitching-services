@@ -175,10 +175,14 @@ def config_format(config_data):
         ("collection_regex", True),
     ]
 
+    exclude_if_None = ['collection_regex']
+
     yaml_lines = []
     for key, is_complex in key_order:
         if key:
             value = config_data.get(key)
+            if value == None and key in exclude_if_None:
+                continue
             if is_complex:
                 # Complex structures (lists, dicts)
                 dumped_value = yaml.dump({key: value}, default_flow_style=False, sort_keys=False).split('\n')

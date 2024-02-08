@@ -26,7 +26,7 @@ import base64
 import yaml
 import getpass
 
-
+verification_token = "SAVIO_VERIFICATION"
 
 def generate_key_from_password(password, salt):
     kdf = PBKDF2HMAC(
@@ -40,10 +40,11 @@ def generate_key_from_password(password, salt):
     return key
 
 def encrypt_message(msg, password):
+    combined_msg = verification_token + msg
     salt = os.urandom(16)  # Generate a new salt for each encryption
     key = generate_key_from_password(password, salt)
     fernet = Fernet(key)
-    encMsg = fernet.encrypt(msg.encode())
+    encMsg = fernet.encrypt(combined_msg.encode())
     return salt + encMsg  # Prepend salt to encrypted message
 
 def decrypt_message(encMsg, password=None):
@@ -52,8 +53,14 @@ def decrypt_message(encMsg, password=None):
     salt = encMsg[:16]  # Extract the salt from the beginning
     key = generate_key_from_password(password, salt)
     fernet = Fernet(key)
-    msg = fernet.decrypt(encMsg[16:]).decode()  # Decrypt the message without the salt
-    return msg
+    decrypted_msg = fernet.decrypt(encMsg[16:]).decode()  # Decrypt the message without the salt
+
+    # Check for the verification token
+    if decrypted_msg.startswith(verification_token):
+        return decrypted_msg[len(verification_token):]
+    else:
+        raise ValueError("Decryption failed or wrong password provided.")
+
 
 if __name__ == "__main__":
     
@@ -67,6 +74,10 @@ if __name__ == "__main__":
     secret_key = getpass.getpass("  Enter your secret key: ")
     print("\nNow encrypt these details with a password")
     password = getpass.getpass("  Enter password here: ")
+    password2 = getpass.getpass("  Re-enter password here: ")
+
+    if password != password2:
+        raise ValueError("Passwords do not match. Try again")
 
     pin_encrypted = encrypt_message(pin, password)
     secret_key_encrypted = encrypt_message(secret_key, password)
@@ -80,3 +91,5 @@ if __name__ == "__main__":
     # Write the updated data back to the file
     with open(os.path.join(root_dir, "Config/savio_credentials.yml"), 'w') as file:
         yaml.dump(savcred, file)
+
+    print("Congratulations! Encryption of Savio credentials was successful.")

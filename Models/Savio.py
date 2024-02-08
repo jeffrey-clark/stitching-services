@@ -35,6 +35,7 @@ pwd = os.getenv('SAVIO_DECRYPTION_PASSWORD')
 
 if not pwd:
     pwd = getpass.getpass("  Enter Savio decryption password: ")
+    u.get_savio_password(pwd)
     os.environ['SAVIO_DECRYPTION_PASSWORD'] = pwd
 
 
@@ -186,6 +187,10 @@ class SavioClient:
 
     @ensure_connection('ftp')
     def download_files_sftp(self, remote_paths, local_paths):
+         # Check if remote_paths and local_paths are lists
+        if not isinstance(remote_paths, list) or not isinstance(local_paths, list):
+            raise TypeError("remote_paths and local_paths must be lists.")
+
         try:
             for remote_path, local_path in zip(remote_paths, local_paths):
                 # Ensure the local directory exists

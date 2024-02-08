@@ -41,6 +41,12 @@ def get_contract(country, contract_name, refresh_data_overview=False):
     return country_contracts.get_contract(contract_name)
 
 
+def upload_conifg_sheet_entry(contract_alias, contract):
+    # Now let us generate a default conifg and upload of not alreay exists
+    config_data = generate_default_config_data(contract.df)
+    config_db.add_contract(contract_alias, config_data)
+
+
 def upload_images(country, contract_alias, contract, contract_status):
     if contract_status.get_status()['image_upload'] != "Done":
         t = TabeiClient()
@@ -110,6 +116,49 @@ def create_and_download_thumbnails(country, contract_name, contract_status):
 def check_if_crop_finished(contract_status):
     if contract_status.get_status()['crop_params'] != "Done":
         raise BrokenPipeError("You need to finish the manual cropping stage")
+    
+
+def initialize_and_crop(contract_alias, country, machine, contract, contract_status):
+    
+    status = contract_status.get_status()
+    if status['crop_params'] != "Done":
+        raise BrokenPipeError("You need to finish the manual cropping stage")
+    if status['init_and_crop'] != "Done":
+        
+        # export the contract for savio
+        config_fp = config_db.export_config(contract_alias, country, machine)
+        shell_fp = generate_shell_script(contract_alias, machine, 1)
+
+        config_fp_remote = os.path.join(cfg[machine]['config_folder'], os.path.basename(config_fp))
+        shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+
+        if machine == "savio":
+            s = SavioClient()
+            s.upload_files_sftp([config_fp, shell_fp], [config_fp_remote, shell_fp_remote])
+
+            # send execution command
+            s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+            print(f"Command sent to {machine}: Initialize, Crop and Inspect Cropping")
+
+        contract_status.update_status('init_and_crop', f"Submitted")
+
+
+def download_cropping_sample(contract_alias, country, machine, contract_status):
+    if contract_status.get_status()['download_cropping_sample'] != "Done":
+        s = SavioClient()
+        remote_fp = os.path.join(cfg[machine]['results_folder'], "cropping_sample.jpg")
+        local_fp = os.path.join(cfg['local']['results'], country, contract_alias, "cropping_sample.jpg")
+        # make sure that we have the local dir
+        os.makedirs(local_fp, exist_ok=True)
+        
+        s.download_files_sftp([remote_fp], [[local_fp]])
+
+        contract_status.update_status('download_cropping_sample', f"Done")
+
+
+def featurize():
+    pass
+
 
 
 def main(contract_name, country, machine, contract_alias=None, refresh_data_overview=False):
@@ -119,6 +168,8 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
 
     contract = get_contract(country, contract_name, refresh_data_overview) # This is a contract object from the Data Overview
     contract_status = get_contract_status_object(contract_alias, machine)  # This is the Google Sheet Status Row
+    upload_conifg_sheet_entry(contract_alias, contract)  # Add a default config row in Google Sheet Config
+
 
     # Step 1: Upload Images from Tabei to Machine
     upload_images(country, contract_alias, contract, contract_status)
@@ -132,29 +183,12 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
     # Step 4: Manual Crop check
     check_if_crop_finished(contract_status)
 
-    
+    # Step 5: Initialize, crop and inspect crop
+    initialize_and_crop(contract_alias, country, machine, contract, contract_status)
 
+    # Step 6: Download crop
+    download_cropping_sample(contract_alias, country, machine, contract_status)
 
-    #  # ---- upload and execute the initialize and cropping script
-    
-    # if contract_status.get_status()['cropping'] != "Done":
-
-    #     # Now let us generate a default conifg and upload of not alreay exists
-    #     config_data = generate_default_config_data(my_contract.df)
-    #     config_db.add_contract(contract_alias, config_data)
-        
-    #     # export the contract for savio
-    #     config_fp = config_db.export_config(contract_alias, country, machine)
-    #     shell_fp = generate_shell_script(contract_alias, machine, 1)
-
-    #     config_fp_remote = os.path.join(cfg[machine]['config_folder'], os.path.basename(config_fp))
-    #     shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
-
-    #     s = SavioClient()
-    #     s.upload_files_sftp([config_fp, shell_fp], [config_fp_remote, shell_fp_remote])
-
-    #     # send execution command
-    #     # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
 
 
 
