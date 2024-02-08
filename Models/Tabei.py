@@ -181,6 +181,26 @@ class TabeiClient:
         except Exception as e:
             print(f"An error occurred during file upload: {e}")
             raise e
+        
+    @ensure_connection('ftp')
+    def get_filepaths_in_folders(self, folder_paths):
+        """
+        Returns the file sizes of all files within the specified folders.
+
+        :param folder_paths: List of paths to the folders
+        :return: Dictionary where keys are folder paths and values are lists of tuples (file name, file size)
+        """
+        filepaths = []
+        with tqdm(total=len(folder_paths), desc="Getting filepaths from folders", file=sys.stdout) as pbar:
+            for folder_path in folder_paths:
+                try:
+                    files = self.sftp.listdir(folder_path)
+                    fps = [os.path.join(folder_path, x) for x in files]
+                    filepaths.extend(fps)
+                except Exception as e:
+                    print(f"An error occurred while accessing {folder_path}: {e}")
+                pbar.update(1)
+        return filepaths
 
     @ensure_connection('ftp')
     def download_files_sftp(self, remote_paths, local_paths):

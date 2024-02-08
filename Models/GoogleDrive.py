@@ -323,7 +323,7 @@ class ConfigSheet(GoogleSheet):
 
 
 
-status_columns = ['contract_name', 'machine', 'user', 'image_upload', 'cropping', 'regex_test']
+status_columns = ['contract_name', 'machine', 'user', 'image_upload' 'regex_test', 'thumbnails', 'crop_params']
 
 class StatusSheet(GoogleSheet):
     def __init__(self, spreadsheet_id, sheet_name):

@@ -11,7 +11,9 @@ from tqdm import tqdm
 import time
 import re
 
+
 from Functions.automation_utils import upload_images_savio
+from Local.download_thumbnails import tabei_create_thumbnails, download_thumbnails
 
 
 cfg = u.read_config()
@@ -20,33 +22,31 @@ status_db = StatusSheet(cfg['google_drive']['config_files']['id'], "status")
 
 
 
-def main(machine, country, contract_name, contract_alias=None):
-
-    # ----- Initialization -----
-
-    if contract_alias is None:
-        contract_alias = contract_name
-
+def get_contract_status_object(contract_alias, machine):
     # load in the status object as contract_status
-    exists = status_db.contract_exists(contract_name, machine, cfg['savio']['username'])
+    exists = status_db.contract_exists(contract_alias, machine, cfg['savio']['username'])
     if not exists:
-        status_db.add_contract(contract_name, machine, cfg['savio']['username'])
-    contract_status = Status(status_db, contract_name, machine, cfg['savio']['username'])
+        status_db.add_contract(contract_alias, machine, cfg['savio']['username'])
+    contract_status = Status(status_db, contract_alias, machine, cfg['savio']['username'])
+    return contract_status
 
+
+def get_contract(country, contract_name, refresh_data_overview=False):
     # Load the contract from Data Overview file.
-    country_contracts = Country(country, refresh=False)
-
+    if refresh_data_overview:
+        country_contracts = Country(country, refresh=True)
+    else:
+        country_contracts = Country(country, refresh=False)
     # get the specific contract of interest
-    my_contract = country_contracts.get_contract(contract_name)
+    return country_contracts.get_contract(contract_name)
 
 
-    # ----- upload the files from Tabei to Machine -----
-
+def upload_images(country, contract_alias, contract, contract_status):
     if contract_status.get_status()['image_upload'] != "Done":
         t = TabeiClient()
         s = SavioClient()
 
-        folders = my_contract.df.path.to_list()
+        folders = contract.df.path.to_list()
 
         # add a quick skip from google sheet if we know uploads went well. 
         t.connect('shell')
@@ -58,15 +58,14 @@ def main(machine, country, contract_name, contract_alias=None):
         contract_status.update_status('image_upload', "Done")
 
 
-    # ----- verify the regex path
+def regex_test(contract_alias, contract, contract_status):
+
     if contract_status.get_status()['regex_test'] != "Done":
             
         # we need to get all filepaths
-        s = SavioClient()
-        folders = my_contract.df.path.to_list()
-        savio_directory_mappings = s.convert_to_savio_paths(folders, country)
-        savio_folders = [savio_path for _, savio_path in savio_directory_mappings]
-        fps = s.get_filepaths_in_folders(savio_folders)
+        t = TabeiClient()
+        folders = contract.df.path.to_list()
+        fps = t.get_filepaths_in_folders(folders)
 
         # check for a custom regex pattern in the config sheet
         contract_cfg = config_db.get_config(contract_alias)
@@ -79,7 +78,7 @@ def main(machine, country, contract_name, contract_alias=None):
         failed_fps = []
         for fp in fps:
             file = os.path.basename(fp)
-            if file.lower().startswith('job sheet'):
+            if file.lower().startswith('job sheet') or file.lower().startswith('job card'):
                 continue
             if ((file.endswith('.jpg') or file.endswith('.tif'))
                         and not file.startswith('._')):
@@ -95,41 +94,75 @@ def main(machine, country, contract_name, contract_alias=None):
         if len(failed_fps) > 0:
             contract_status.update_status('regex_test', f"Failed: {failed_fps[0:2]}")
             raise ValueError("Images need custom regex. Update config file.")
-
+        
+        print("Images paassed regex test.")
         contract_status.update_status('regex_test', f"Done")
 
 
-    # ---- upload and execute the initialize and cropping script
+def create_and_download_thumbnails(country, contract_name, contract_status):
+   
+    if contract_status.get_status()['thumbnails'] != "Done":
+        tabei_create_thumbnails(country, contract_name)
+        download_thumbnails(country, contract_name)
+        contract_status.update_status('thumbnails', f"Done")
+
+
+def check_if_crop_finished(contract_status):
+    if contract_status.get_status()['crop_params'] != "Done":
+        raise BrokenPipeError("You need to finish the manual cropping stage")
+
+
+def main(contract_name, country, machine, contract_alias=None, refresh_data_overview=False):
+
+    if contract_alias is None:
+        contract_alias = contract_name
+
+    contract = get_contract(country, contract_name, refresh_data_overview) # This is a contract object from the Data Overview
+    contract_status = get_contract_status_object(contract_alias, machine)  # This is the Google Sheet Status Row
+
+    # Step 1: Upload Images from Tabei to Machine
+    upload_images(country, contract_alias, contract, contract_status)
+
+    # Step 2: Regex Test
+    regex_test(contract_alias, contract, contract_status)
+
+    # Step 3: Create and Download Thumbnails
+    create_and_download_thumbnails(country, contract_name, contract_status)
+
+    # Step 4: Manual Crop check
+    check_if_crop_finished(contract_status)
+
     
-    if contract_status.get_status()['cropping'] != "Done":
 
-        # Now let us generate a default conifg and upload of not alreay exists
-        config_data = generate_default_config_data(my_contract.df)
-        config_db.add_contract(contract_alias, config_data)
+
+    #  # ---- upload and execute the initialize and cropping script
+    
+    # if contract_status.get_status()['cropping'] != "Done":
+
+    #     # Now let us generate a default conifg and upload of not alreay exists
+    #     config_data = generate_default_config_data(my_contract.df)
+    #     config_db.add_contract(contract_alias, config_data)
         
-        # export the contract for savio
-        config_fp = config_db.export_config(contract_alias, country, machine)
-        shell_fp = generate_shell_script(contract_alias, machine, 1)
+    #     # export the contract for savio
+    #     config_fp = config_db.export_config(contract_alias, country, machine)
+    #     shell_fp = generate_shell_script(contract_alias, machine, 1)
 
-        config_fp_remote = os.path.join(cfg[machine]['config_folder'], os.path.basename(config_fp))
-        shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+    #     config_fp_remote = os.path.join(cfg[machine]['config_folder'], os.path.basename(config_fp))
+    #     shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
 
-        s = SavioClient()
-        s.upload_files_sftp([config_fp, shell_fp], [config_fp_remote, shell_fp_remote])
+    #     s = SavioClient()
+    #     s.upload_files_sftp([config_fp, shell_fp], [config_fp_remote, shell_fp_remote])
 
-        # send execution command
-        # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+    #     # send execution command
+    #     # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+
 
 
 
 
 if __name__ == "__main__":
-    machine = "savio"
     country = "Nigeria"
     contract_name = "NCAP_DOS_SHELL_BP"
-    contract_name = "NCAP_DOS_USAAF_1"
-    main(machine, country, contract_name)
+    # contract_name = "NCAP_DOS_USAAF_1"
 
-    # s = SavioClient()
-    # sq = s.get_job_list()
-    # print(sq)
+    main(contract_name, country, "savio")
