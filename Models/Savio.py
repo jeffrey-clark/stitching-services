@@ -145,6 +145,7 @@ class SavioClient:
         error = stderr.read().decode('utf-8')
         if error:
             print("Error:", error)
+            raise error
         return output
     
     @ensure_connection('shell')
