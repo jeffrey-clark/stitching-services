@@ -33,8 +33,8 @@ cfg = u.read_config()
 
 
 def upload_to_bucket(directories, country):
-    bucket_path = cfg['google_vm']['bucket_path'].rstrip('/')
-    bucket_images = cfg['google_vm']['bucket_images'].strip('/')
+    bucket_path = cfg['google_vm']['gsutil_paths']['bucket'].rstrip('/')
+    bucket_images = cfg['google_vm']['gsutil_paths']['images_folder'].strip('/')
     
     for directory in directories:
         if os.path.isdir(directory):

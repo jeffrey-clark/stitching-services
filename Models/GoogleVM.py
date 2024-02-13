@@ -96,7 +96,6 @@ class VMClient:
         self.sftp = None
         self.connected = False
         self.host_type = None
-        
     
     def get_instance_external_ip(self):
         command = [
@@ -209,6 +208,94 @@ class VMClient:
         except Exception as e:
             print(f"An error occurred during file download: {e}")
             raise e
+    
+    def convert_to_bucket_paths(self, directories, country):
+        """
+        Converts Tabei directory paths to Savio directory paths.
+
+        :param directories: List of Tabei directory paths
+        :param country: Country name for the Savio directory structure
+        :return: List of tuples (local_directory, savio_directory)
+        """
+
+        directory_mappings = []
+        for directory in directories:
+            folder_name = os.path.basename(directory.rstrip('/'))
+            bucket_path = os.path.join(cfg['gsutil_paths']['images_folder'], country, folder_name)
+            directory_mappings.append((directory, bucket_path))
+        return directory_mappings
+    
+
+    def get_bucket_folder_sizes(self, bucket_path):
+        result = subprocess.run(["gsutil", "du", "-s", bucket_path], capture_output=True, text=True)
+        output = result.stdout
+
+        # Process the output to get sizes
+        sizes = {}
+        for line in output.splitlines():
+            size, path = line.split()
+            sizes[path] = int(size)
+        return sizes
+
+
+    def get_bucket_folders_total_sizes(self, bucket_paths):
+        folder_total_sizes = {}
+        with tqdm(total=len(bucket_paths), desc="Getting folder sizes", file=sys.stdout) as pbar:
+            for bucket_path in bucket_paths:
+                try:
+                    # Ensure the path ends with '/*' to include all files in the folder
+                    full_path = f"{bucket_path.rstrip('/')}/*"
+                    result = subprocess.run(["gsutil", "du", "-s", full_path], capture_output=True, text=True)
+                    output = result.stdout.strip()
+
+                    if output:  # Check if there's any output
+                        size, _ = output.split()
+                        folder_total_sizes[bucket_path] = int(size)
+                    else:
+                        print(f"No size information available for {bucket_path}")
+                except Exception as e:
+                    print(f"An error occurred while accessing {bucket_path}: {e}")
+                finally:
+                    pbar.update(1)  # Update progress
+        return folder_total_sizes
+
+
+    @ensure_connection('shell')
+    def send_tmux_command(self, session_name, command):
+        # Using bash -c to execute the tmux command
+        full_command = f"bash -c \"tmux new-session -d -s {session_name} '{command}'\""
+        print("full command is")
+        print(full_command)
+        output = self.execute_command(full_command)
+        if output:
+            print(f"Output from tmux command: {output}")
+        else:
+            print(f"Started tmux session '{session_name}' with command: {command}")
+
+
+    @ensure_connection('shell')
+    def list_tmux_sessions(self):
+        output, error = self._execute_command_capture_error("tmux list-sessions")
+
+        # Handle the case where no tmux sessions are running
+        if error and "no server running" in error.lower():
+            # If the error is specifically about no tmux sessions, return None without printing the error
+            return None
+        elif error:
+            # If there's some other error, print it
+            print("Error:", error)
+
+        return output
+
+
+    def check_tmux_session(self, tmux_name):
+        # first check if there is a tmux session going
+        tmux_sessions_response = self.list_tmux_sessions()
+        if tmux_sessions_response is not None:
+            if tmux_name in tmux_sessions_response:
+                print(f"\n{tmux_name} is still ongoing. Please wait until complete.\n")
+                sys.exit(1)  # Exit the program with a status code of 1 to indicate an error
+
 
 
 if __name__ == "__main__":

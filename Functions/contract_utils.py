@@ -213,19 +213,35 @@ def export_config_file(contract_name, country, config_data, machine_name):
     if machine_name.lower() == "savio":
         # Assuming 'folders' is already a list of paths
         image_folders = [os.path.join(paths['images_folder'], country, os.path.basename(os.path.dirname(x))) + "/" for x in config_data['folders']]
+
+        # Machine-specific paths
+        machine_specific_data = {
+            "img_cache_folder": os.path.join(paths['cache_folder'], contract_name, "SURF"),
+            "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_name),
+            "raster_output_folder": os.path.join(paths['results_folder'], contract_name),
+            "swath_folder": os.path.join(paths['cache_folder'], contract_name),
+        }
+
+    elif machine_name.lower() == "google_vm":
+        dp = cfg['google_vm']['docker_paths']
+
+        image_folders = [os.path.join(dp['images_folder'].rstrip('/'), country, os.path.basename(os.path.dirname(x))) + "/" for x in config_data['folders']]
+    
+        # Machine-specific paths
+        machine_specific_data = {
+            "img_cache_folder": os.path.join(dp['cache_folder'], contract_name, "SURF"),
+            "checkpoint_cache_folder": os.path.join(dp['cache_folder'], contract_name),
+            "raster_output_folder": os.path.join(dp['results_folder'], contract_name),
+            "swath_folder": os.path.join(dp['cache_folder'], contract_name),
+        }
+    
     else:  # For 'tabei' and other machines
-        image_folders = config_data['folders']  # Already in the correct format
+        #image_folders = config_data['folders']  # Already in the correct format
+        raise ValueError("NO CONFIG DATA FOR PROVIDED MACHINE")
+    
 
     # Update config_data with the processed image_folders
     config_data['folders'] = image_folders
-
-    # Machine-specific paths
-    machine_specific_data = {
-        "img_cache_folder": os.path.join(paths['cache_folder'], contract_name, "SURF"),
-        "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_name),
-        "raster_output_folder": os.path.join(paths['results_folder'], contract_name),
-        "swath_folder": os.path.join(paths['cache_folder'], contract_name),
-    }
 
     # Combine common and machine-specific configuration data
     config_data.update(machine_specific_data)
