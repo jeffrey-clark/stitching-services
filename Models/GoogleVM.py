@@ -258,6 +258,65 @@ class VMClient:
                 finally:
                     pbar.update(1)  # Update progress
         return folder_total_sizes
+    
+
+    def download_from_bucket(self, bucket_paths, local_dest, max_retries=3, wait_seconds=5):
+        # Ensure that bucket_paths is a list
+        if not isinstance(bucket_paths, list):
+            raise ValueError("bucket_paths must be a list")
+
+        # Ensure that local_dest is a string
+        if not isinstance(local_dest, str):
+            raise ValueError("local_dest must be a string")
+
+        # Check if local destination exists
+        if not os.path.exists(local_dest):
+            raise FileNotFoundError(f"The local destination {local_dest} does not exist.")
+
+        for gs_path in bucket_paths:
+            if gs_path.startswith('gs://'):
+                gs_basename = os.path.basename(gs_path.rstrip('/'))
+                full_local_path = os.path.join(local_dest, gs_basename)
+
+                print(f"Downloading {gs_path} to {full_local_path}...")
+
+                for attempt in range(max_retries):
+                    try:
+                        subprocess.run(["gcloud", "storage", "cp", gs_path, full_local_path, "--recursive"], check=True)
+                        print(f"Downloaded {gs_path} successfully.")
+                        break  # Break out of the retry loop if successful
+                    except subprocess.CalledProcessError as e:
+                        print(f"Failed to download {gs_path}: {e}.")
+                        if attempt < max_retries - 1:
+                            print(f"Retrying in {wait_seconds} seconds...")
+                            time.sleep(wait_seconds)
+                        else:
+                            print(f"Exceeded maximum retries for {gs_path}.")
+            else:
+                print(f"Skipping {gs_path}, not a valid Google Cloud Storage path.")
+
+        print("Download complete.")
+
+
+    def listdir_bucket(self, gs_dir):
+    # Ensure gs_dir is a valid Google Cloud Storage directory path
+        if not gs_dir.startswith('gs://'):
+            raise ValueError("Invalid Google Cloud Storage path. Must start with 'gs://'.")
+
+        # Ensure the path ends with a slash to list contents of the directory
+        if not gs_dir.endswith('/'):
+            gs_dir += '/'
+
+        try:
+            # Run the gsutil ls command
+            result = subprocess.run(["gsutil", "ls", gs_dir], capture_output=True, text=True, check=True)
+            # Split the output into lines and filter out empty lines
+            files = [line for line in result.stdout.split('\n') if line]
+            files.remove(gs_dir)
+            return files
+        except subprocess.CalledProcessError as e:
+            raise RuntimeError(f"An error occurred while listing the directory: {e}")
+
 
 
     @ensure_connection('shell')

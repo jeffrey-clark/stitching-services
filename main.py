@@ -50,7 +50,7 @@ def upload_conifg_sheet_entry(contract_alias, contract):
 
 def upload_images(country, contract_alias, contract, contract_status):
 
-    if contract_status.get_status()['image_upload'] != "Done":
+    if contract_status.data['image_upload'] != "Done":
 
         if contract_status.machine == "savio":
             t = TabeiClient()
@@ -82,7 +82,7 @@ def upload_images(country, contract_alias, contract, contract_status):
 
 def regex_test(contract_alias, contract, contract_status):
 
-    if contract_status.get_status()['regex_test'] != "Done":
+    if contract_status.data['regex_test'] != "Done":
             
         # we need to get all filepaths
         t = TabeiClient()
@@ -123,29 +123,29 @@ def regex_test(contract_alias, contract, contract_status):
 
 def create_and_download_thumbnails(country, contract_name, contract_status):
    
-    if contract_status.get_status()['thumbnails'] != "Done":
+    if contract_status.data['thumbnails'] != "Done":
         tabei_create_thumbnails(country, contract_name)
         download_thumbnails(country, contract_name)
         contract_status.update_status('thumbnails', f"Done")
 
 
 def check_if_crop_finished(contract_status):
-    if contract_status.get_status()['crop_params'] != "Done":
+    if contract_status.data['crop_params'] != "Done":
         raise BrokenPipeError("You need to finish the manual cropping stage")
     
 
 def initialize_and_crop(contract_alias, country, contract_status):
     
-    status = contract_status.get_status()
+    status = contract_status.data
     machine = status['machine']
 
     if status['crop_params'] != "Done":
-        raise BrokenPipeError("You need to finish the manual cropping stage")
+        raise RuntimeError("You need to finish the manual cropping stage")
     if status['init_and_crop'] != "Done":
         
         # export the contract for savio
         config_fp = config_db.export_config(contract_alias, country, machine)
-        shell_fp = generate_shell_script(contract_alias, machine, 1)
+        shell_fp = generate_shell_script(contract_alias, machine, 'initialize_and_crop')
 
         if machine == "savio":
             s = SavioClient()
@@ -170,16 +170,9 @@ def initialize_and_crop(contract_alias, country, contract_status):
             
             vm.upload_files_sftp([config_fp, shell_fp], [config_fp_remote, shell_fp_remote])
 
-            # remove any completed containers
-            vm.connect()
-            vm._execute_command_capture_error(f"sudo docker rm {contract_alias}_initialize")
-            vm._execute_command_capture_error(f"sudo docker rm {contract_alias}_crop")
-            vm._execute_command_capture_error(f"sudo docker rm {contract_alias}_inspect_cropping")
-
             # execute the command in a tmux session
             vm.send_tmux_command(f"{contract_alias}_stage_1", f"bash {shell_fp_remote}")
             print(f"Command sent to {machine}: Initialize, Crop and Inspect Cropping")
-            vm.close()
 
         contract_status.update_status('init_and_crop', f"Submitted")
         exit()
@@ -187,22 +180,24 @@ def initialize_and_crop(contract_alias, country, contract_status):
 
 def download_cropping_sample(contract_alias, country, contract_status):
 
-    status = contract_status.get_status()
+    status = contract_status.data
     machine = status['machine']
 
     if status['download_cropping_sample'] != "Done":
 
-        remote_fp = os.path.join(cfg[machine]['results_folder'], contract_alias, "cropping_sample.jpg")
+        
         local_fp = os.path.join(cfg['local']['results'], country, contract_alias, "cropping_sample.jpg")
         # make sure that we have the local dir
         os.makedirs(os.path.dirname(local_fp), exist_ok=True)
 
         if machine == "savio":
             s = SavioClient()
+            remote_fp = os.path.join(cfg[machine]['results_folder'], contract_alias, "cropping_sample.jpg")
             s.download_files_sftp([remote_fp], [local_fp])
 
         elif machine == "google_vm":
             vm = VMClient()
+            remote_fp = os.path.join(cfg['google_vm']['vm_paths']['results_folder'], contract_alias, "cropping_sample.jpg")
             vm.download_files_sftp([remote_fp], [local_fp])
             #
             #  CHANGE ABOVE SO THAT IT DOWNLOADS IMMEDIATELY FROM BUCKET INSTEAD THROUGH VM
@@ -212,12 +207,12 @@ def download_cropping_sample(contract_alias, country, contract_status):
 
 def featurize(contract_status):
     
-    status = contract_status.get_status()
+    status = contract_status.data
     machine = status['machine']
     contract_alias = status['contract']
 
     if status['init_and_crop'] != "Done":
-        raise BrokenPipeError("You need to finish the initialize and cropping stage")
+        raise RuntimeError("You need to finish the initialize and cropping stage")
     if status['featurize'] != "Done":
         
         
@@ -226,7 +221,7 @@ def featurize(contract_status):
             s = SavioClient()
 
             # export and upload the shell script
-            shell_fp = generate_shell_script(contract_alias, machine, 2)
+            shell_fp = generate_shell_script(contract_alias, machine, 'featurize')
             shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
 
             s.upload_files_sftp([shell_fp], [shell_fp_remote])
@@ -248,12 +243,227 @@ def featurize(contract_status):
             vm.send_tmux_command(f"{contract_alias}_stage_2", f"bash {shell_fp_remote}")
             print(f"Command sent to {machine}: Featurize")
 
+
         contract_status.update_status('featurize', f"Submitted")
 
 
+def swath_breaks(contract_status):
+    
+    status = contract_status.data
+    machine = status['machine']
+    contract_alias = status['contract']
+
+    if status['featurize'] != "Done":
+        raise RuntimeError("You need to finish the initialize and cropping stage")
+    if status['swath_breaks'] != "Done":
+        
+        # export the shell script
+        shell_fp = generate_shell_script(contract_alias, machine, 'swath_breaks')
+
+        if machine == "savio":
+            s = SavioClient()
+
+            # # export and upload the shell script
+            # shell_fp = generate_shell_script(contract_alias, machine, 2)
+            # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+
+            # s.upload_files_sftp([shell_fp], [shell_fp_remote])
+
+            # # send execution command
+            # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+            # print(f"Command sent to {machine}: Featurize")
+
+        elif machine == "google_vm":
+            vm = VMClient()
+
+            # export and upload the shell script
+            shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
+
+            vm.upload_files_sftp([shell_fp], [shell_fp_remote])
+            # execute the command in a tmux session
+            vm.send_tmux_command(f"{contract_alias}_stage_3", f"bash {shell_fp_remote}")
+            print(f"Command sent to {machine}: swath_breaks")
+
+        contract_status.update_status('swath_breaks', f"Submitted")
 
 
 
+def stitch_across(contract_status):
+    
+    status = contract_status.data
+    machine = status['machine']
+    contract_alias = status['contract']
+
+    if status['swath_breaks'] != "Done":
+        raise RuntimeError("You need to finish the initialize and cropping stage")
+    if status['stitch_across'] != "Done":
+        
+
+        if machine == "savio":
+            s = SavioClient()
+
+            # # export and upload the shell script
+            # shell_fp = generate_shell_script(contract_alias, machine, 2)
+            # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+
+            # s.upload_files_sftp([shell_fp], [shell_fp_remote])
+
+            # # send execution command
+            # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+            # print(f"Command sent to {machine}: Featurize")
+
+        elif machine == "google_vm":
+            vm = VMClient()
+
+            # export and upload the shell script
+            shell_fp = generate_shell_script(contract_alias, machine, 'stitch_across')
+            shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
+
+            vm.upload_files_sftp([shell_fp], [shell_fp_remote])
+
+            # execute the command in a tmux session
+            vm.send_tmux_command(f"{contract_alias}_stage_3", f"bash {shell_fp_remote}")
+            print(f"Command sent to {machine}: stitch-across")
+
+        contract_status.update_status('stitch_across', f"Submitted")
+
+
+
+def run_pipeline(contract_status, stage, required_stage):
+
+    status = contract_status.data
+    machine = status['machine']
+    contract_alias = status['contract']
+
+    if status[required_stage] != "Done":
+        raise RuntimeError(f"You need to finish the {required_stage} stage")
+    if status[stage] != "Done":
+        
+        if machine == "savio":
+                s = SavioClient()
+
+                # # export and upload the shell script
+                # shell_fp = generate_shell_script(contract_alias, machine, 2)
+                # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+
+                # s.upload_files_sftp([shell_fp], [shell_fp_remote])
+
+                # # send execution command
+                # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+                # print(f"Command sent to {machine}: Featurize")
+
+        elif machine == "google_vm":
+            vm = VMClient()
+
+            # export and upload the shell script
+            shell_fp = generate_shell_script(contract_alias, machine, stage)
+            shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
+
+            vm.upload_files_sftp([shell_fp], [shell_fp_remote])
+
+            # execute the command in a tmux session
+            vm.send_tmux_command(f"{contract_alias}_{stage}", f"bash {shell_fp_remote}")
+            print(f"Command sent to {machine}: {stage}")
+
+        contract_status.update_status(stage, f"Submitted")
+
+
+
+def download_clusters(contract_status, stage, required_stage):
+
+    status = contract_status.data
+    machine = status['machine']
+    contract_alias = status['contract']
+
+    if status[required_stage] != "Done":
+        raise RuntimeError(f"You need to finish the {required_stage} stage")
+    if status[stage] != "Done":
+
+        if machine == "savio":
+                s = SavioClient()
+
+        elif machine == "google_vm":
+            vm = VMClient()
+
+            bucket_results_folder = os.path.join(cfg['google_vm']['gsutil_paths']['bucket'], "results", contract_alias)
+
+            bucket_files_fps = [x for x in vm.listdir_bucket(bucket_results_folder) if not x.endswith("/")]
+            local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
+            os.makedirs(os.path.dirname(local_results_folder), exist_ok=True)
+
+            vm.download_from_bucket(bucket_files_fps, local_results_folder)
+
+        contract_status.update_status(stage, f"Done")
+
+
+
+def new_neighbors(contract_status, stage, required_stage):
+    status = contract_status.data
+    machine = status['machine']
+    contract_alias = status['contract']
+
+    if status[required_stage] != "Done":
+        raise RuntimeError(f"You need to finish the {required_stage} stage")
+    if status[stage] != "Done":
+        # parse the keep_clusters from the config file
+        contract_config = config_db.get_config(contract_alias)
+        try:
+            cluster_ids = [int(x.strip()) for x in contract_config['keep_clusters'].split(",")]
+        except:
+            raise ValueError("Cluster ids in config sheet 'keep_clusters' is not correctly specified. Make sure it is a comma separated string of integers, indicating clusters to keep")
+        
+        if machine == "savio":
+            s = SavioClient()
+
+        elif machine == "google_vm":
+            vm = VMClient()
+
+            # export and upload the shell script
+            shell_fp = generate_shell_script(contract_alias, machine, stage, ids=cluster_ids)
+        #     shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
+
+        #     vm.upload_files_sftp([shell_fp], [shell_fp_remote])
+
+        #     # execute the command in a tmux session
+        #     vm.send_tmux_command(f"{contract_alias}_{stage}", f"bash {shell_fp_remote}")
+        #     print(f"Command sent to {machine}: {stage}")
+            
+
+        # contract_status.update_status(stage, f"Submitted")
+
+
+
+def export_for_georeferencing(contract_status):
+    status = contract_status.data
+    machine = status['machine']
+    contract_alias = status['contract']
+
+    if status['export_georef'] != "Done":
+        # parse the keep_clusters from the config file
+        contract_config = config_db.get_config(contract_alias)
+        try:
+            cluster_ids = [int(x.strip()) for x in contract_config['keep_clusters'].split(",")]
+        except:
+            raise ValueError("Cluster ids in config sheet 'keep_clusters' is not correctly specified. Make sure it is a comma separated string of integers, indicating clusters to keep")
+        
+        if machine == "savio":
+            s = SavioClient()
+
+        elif machine == "google_vm":
+            vm = VMClient()
+
+            # export and upload the shell script
+            shell_fp = generate_shell_script(contract_alias, machine, 'export_georef', ids=cluster_ids)
+            shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
+
+            vm.upload_files_sftp([shell_fp], [shell_fp_remote])
+
+            # execute the command in a tmux session
+            vm.send_tmux_command(f"{contract_alias}_export_georef", f"bash {shell_fp_remote}")
+            print(f"Command sent to {machine}: export_georef")
+            
+
+        # contract_status.update_status(stage, f"Submitted")
 
 
 
@@ -291,6 +501,27 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
     # Step 7: Featurize
     featurize(contract_status)
 
+    # Step 8: Swatth breaks
+    swath_breaks(contract_status)
+
+    # Step 9: Stitch Across
+    stitch_across(contract_status)
+
+    # Step 10: Initialize Graph, Refine Links, Opt Links, Global Opts
+    run_pipeline(contract_status, "initialize_graph", "stitch_across")
+
+    # Step 11: Create Raster
+    run_pipeline(contract_status, "create_raster_1", "initialize_graph")
+
+    # Step 12: Download Rasters
+    download_clusters(contract_status, "download_clusters_1", "create_raster_1")
+
+    # Step 13: New Neighbors
+    #new_neighbors(contract_status, "new_neighbors", "create_raster_1")
+
+
+    # Export for georeferencing
+    export_for_georeferencing(contract_status)
 
 
 

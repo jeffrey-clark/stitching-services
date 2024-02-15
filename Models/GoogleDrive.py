@@ -325,7 +325,8 @@ class ConfigSheet(GoogleSheet):
 
 status_columns = ['contract_name', 'machine', 'user', 'image_upload', 'regex_test', 'thumbnails', 'crop_params',
                   'init_and_crop', 'download_cropping_sample', 'featurize',	'swath_breaks',	'download_swaths',	
-                  'stitch_across']
+                  'stitch_across', 'initialize_graph', 'create_raster_1', 'download_clusters_1', 'new_neighbors',
+                  'export_georef']
 
 class StatusSheet(GoogleSheet):
     def __init__(self, spreadsheet_id, sheet_name):
@@ -485,6 +486,7 @@ class Status:
         self.contract_name = contract_name
         self.machine = machine
         self.user = user
+        self.data = self.refresh_status()
 
     def refresh_status(self):
         """
@@ -506,14 +508,14 @@ class Status:
         Updates the status for a specified column.
         """
         self.status_sheet.update_status(self.contract_name, self.machine, self.user, column_name, status)
-        # self.refresh_status()  # Refresh the status data after update
+        self.refresh_status()  # Refresh the status data after update
 
     def update_status_multiple(self, status_updates):
         """
         Updates multiple statuses.
         """
         self.status_sheet.update_status_multiple(self.contract_name, self.machine, self.user, status_updates)
-        # self.refresh_status()  # Refresh the status data after updates
+        self.refresh_status()  # Refresh the status data after updates
 
 
 
