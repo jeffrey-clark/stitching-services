@@ -39,7 +39,7 @@ def upload_to_bucket(directories, country):
     for directory in directories:
         if os.path.isdir(directory):
             folder_name = os.path.basename(directory.rstrip('/'))
-            full_dest_path = os.path.join(bucket_path, bucket_images, country, folder_name)
+            full_dest_path = os.path.join(bucket_images, country, folder_name)
             print(f"Uploading {directory} to {full_dest_path}...")
             subprocess.run(["gcloud", "storage", "cp", directory, full_dest_path, "--recursive"])
         else:
