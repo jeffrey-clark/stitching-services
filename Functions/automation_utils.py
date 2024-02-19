@@ -167,10 +167,13 @@ def upload_images_bucket(contract_alias, folders, country, pwd, t, vm):
     if len(mismatched_folders) > 0:
         # prepare the tmux upload command
         env_interpreter = os.path.join(cfg['tabei']['conda_env'], "bin", "python")
-        cmd_path = os.path.join(cfg['tabei']['stitching-services'], "Tabei/upload_folders.py") 
+        cmd_path_upload = os.path.join(cfg['tabei']['stitching-services'], "Tabei/upload_folders.py")
+        cmd_path_update = os.path.join(cfg['tabei']['stitching-services'], "Local/update_status.py") 
         folder_string = " ".join(mismatched_folders)
         set_password = f"export SAVIO_DECRYPTION_PASSWORD={pwd}"  # need to send the password for SavioClient decryption.
-        command = f"{set_password} && {env_interpreter} {cmd_path} --paths {folder_string} --country {country} --destination Bucket"
+        upload_command = f"{env_interpreter} {cmd_path_upload} --paths {folder_string} --country {country} --destination Bucket"
+        update_status_command = f"{env_interpreter} {cmd_path_update} --contract_alias {contract_alias} --machine google_vm --column image_upload --value Done"
+        command = f"{set_password} && {upload_command} && {update_status_command}"
 
         # send the command to upload
         t.send_tmux_command(f"{contract_alias}_upload", command)
