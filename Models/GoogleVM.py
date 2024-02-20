@@ -221,7 +221,7 @@ class VMClient:
         directory_mappings = []
         for directory in directories:
             folder_name = os.path.basename(directory.rstrip('/'))
-            bucket_path = os.path.join(cfg['gsutil_paths']['images_folder'], country, folder_name)
+            bucket_path = os.path.join(cfg['google_vm']['gsutil_paths']['images_folder'], country, folder_name)
             directory_mappings.append((directory, bucket_path))
         return directory_mappings
     
@@ -317,6 +317,30 @@ class VMClient:
         except subprocess.CalledProcessError as e:
             raise RuntimeError(f"An error occurred while listing the directory: {e}")
 
+
+    def delete_from_bucket(self, gs_paths):
+        """
+        Deletes folders or files from Google Cloud Storage.
+
+        :param gs_paths: List of Google Cloud Storage paths (gs://bucket-name/path/to/folder)
+        """
+        if not isinstance(gs_paths, list):
+            raise ValueError("gs_paths must be a list")
+
+        for gs_path in gs_paths:
+            if gs_path.startswith('gs://'):
+                print(f"Deleting {gs_path}...")
+
+                try:
+                    # Add '-r' for recursive deletion and '-f' to ignore non-existent objects
+                    subprocess.run(["gsutil", "-m", "rm", "-r", "-f", gs_path], check=True)
+                    print(f"Deleted {gs_path} successfully.")
+                except subprocess.CalledProcessError as e:
+                    print(f"Failed to delete {gs_path}: {e}.")
+            else:
+                print(f"Skipping {gs_path}, not a valid Google Cloud Storage path.")
+
+        print("Deletion complete.")
 
 
     @ensure_connection('shell')

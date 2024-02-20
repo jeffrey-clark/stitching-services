@@ -106,7 +106,7 @@ def compare_folder_tabei_bucket(folders, country, t, vm):
     print("  Fetching filesizes from Tabei:")
     tabei_sizes = t.get_folder_total_sizes(folders)
 
-    print("  Fetching filesizes from Savio:")
+    print("  Fetching filesizes from Google Bucket:")
     bucket_directory_mappings = vm.convert_to_bucket_paths(folders, country)
     bucket_paths = [bucket_path for _, bucket_path in bucket_directory_mappings]
     bucket_sizes = vm.get_bucket_folders_total_sizes(bucket_paths)
@@ -163,6 +163,11 @@ def upload_images_bucket(contract_alias, folders, country, pwd, t, vm):
     print("DETAILS:",mismatched_folders_detailed)
 
     mismatched_folders = [x['tabei_key'] for x in mismatched_folders_detailed]
+
+    # Delete folders where there are discrpancies Something must have gone wrong
+    # too_big = [x for x in mismatched_folders_detailed if int(x['tabei_size']) < int(x['bucket_size'])]
+    if len(mismatched_folders_detailed) > 0:
+        vm.delete_from_bucket([x['bucket_key'] for x in mismatched_folders_detailed])
 
     if len(mismatched_folders) > 0:
         # prepare the tmux upload command
