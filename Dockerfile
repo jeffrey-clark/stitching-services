@@ -10,14 +10,17 @@ COPY environment.yml /app/environment.yml
 # Create the Conda environment using the environment file
 RUN conda env create -f /app/environment.yml
 
-# Make RUN commands use the new environment and activate it on shell
-SHELL ["conda", "run", "-n", "stitch-service", "/bin/bash", "-c"]
-
-# Copy the rest of your application's code into the container
-# COPY . /app
-
 # Set the environment name (as defined in your environment.yml)
 ENV CONDA_DEFAULT_ENV stitch-service
 
-# Specify the command to run on container start
-# CMD ["conda", "run", "--no-capture-output", "-n", "stitch-service", "python", "your-script.py"]
+# Create the entrypoint script directly in the Dockerfile
+RUN echo '#!/bin/bash' > /app/entrypoint.sh \
+    && echo 'source activate stitch-service' >> /app/entrypoint.sh \
+    && echo 'exec "$@"' >> /app/entrypoint.sh \
+    && chmod +x /app/entrypoint.sh
+
+# Set the entrypoint script as the default entrypoint
+ENTRYPOINT ["/app/entrypoint.sh"]
+
+# The CMD directive can be used to set a default command, which can be overwritten from the command line when docker run is executed.
+# CMD ["python", "your_default_script.py"] # Replace with your default script or command

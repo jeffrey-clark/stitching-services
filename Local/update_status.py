@@ -34,9 +34,9 @@ cfg = u.read_config()
 status_db = StatusSheet(cfg['google_drive']['config_files']['id'], "status")
 
 
-def update_status(contract_alias, machine, column, value):
+def update_status(contract_alias, machine, username, column, value):
 
-    contract_status = Status(status_db, contract_alias, machine, cfg['savio']['username'])
+    contract_status = Status(status_db, contract_alias, machine, username)
     contract_status.update_status(column, value)
 
         
@@ -45,11 +45,12 @@ if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Update status in Google Sheet")
     parser.add_argument('--contract_alias', type=str, help='Contract alias of row to be updated', required=True)
     parser.add_argument('--machine', type=str, help='Machine of row to be updated', required=True)
+    parser.add_argument('--username', type=str, help='Username of row to be updated', required=True)
     parser.add_argument('--column', type=str, help='Column to be updated', required=True)
     parser.add_argument('--value', type=str, help='Value to be set', required=True)
 
     args = parser.parse_args()
 
-    update_status(args.contract_alias, args.machine, args.column, args.value)
+    update_status(args.contract_alias, args.machine, args.username, args.column, args.value)
 
     

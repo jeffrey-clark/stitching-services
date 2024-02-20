@@ -125,7 +125,7 @@ class GoogleDriveService:
 class GoogleSheet:
     def __init__(self, spreadsheet_id):
         self._SCOPES = ['https://www.googleapis.com/auth/spreadsheets']
-        self._credential_path = os.path.join(root_dir, 'config', 'google_service.json')
+        self._credential_path = os.path.join(root_dir, 'Config', 'google_service.json')
         self.spreadsheet_id = spreadsheet_id
         self.client = self.authenticate()
 
