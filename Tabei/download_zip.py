@@ -55,7 +55,7 @@ def main(contract_alias, origin):
 
     elif origin.lower() == "bucket":
         vm = VMClient()
-        bucket_path = cfg['google_vm']['gsutil_paths']['bucket'].rstrip('/')
+        bucket_path = cfg['bucket']['root'].rstrip('/')
         contract_results = os.path.join(bucket_path, "results", contract_alias)
         zip_fps = [x for x in vm.listdir_bucket(contract_results) if x.endswith(".zip")]
 

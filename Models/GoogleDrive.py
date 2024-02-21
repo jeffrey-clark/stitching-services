@@ -324,9 +324,9 @@ class ConfigSheet(GoogleSheet):
 
 
 status_columns = ['contract_name', 'machine', 'user', 'image_upload', 'regex_test', 'thumbnails', 'crop_params',
-                  'init_and_crop', 'download_cropping_sample', 'featurize',	'swath_breaks',	'download_swaths',	
-                  'stitch_across', 'initialize_graph', 'create_raster_1', 'download_clusters_1', 'new_neighbors',
-                  'export_georef']
+                  'init_and_crop', 'download_cropping_sample', 'featurize',	'swath_breaks',	'rasterize_swaths', 
+                  'download_swaths', 'stitch_across', 'initialize_graph', 'create_raster_1', 'download_clusters_1', 
+                  'new_neighbors', 'export_georef']
 
 class StatusSheet(GoogleSheet):
     def __init__(self, spreadsheet_id, sheet_name):

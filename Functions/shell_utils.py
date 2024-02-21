@@ -234,14 +234,40 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
-def _google_vm_create_raster(contract_alias):
+def _google_vm_create_raster_swaths(contract_alias):
+
+    vm_run_shell = os.path.join(cfg['google_vm']['vm_paths']['services_repo'], "VM/run.sh")
+
+    shell_script_content = _google_vm_base(contract_alias) + f"""
+# Create the swath rasters
+echo "starting create-raster"
+run_docker "create-raster" --raster-type "swaths" 
+
+# organize the swats in folder
+bash {vm_run_shell} VM/move_files.py move_files --contract_alias {contract_alias} --machine google_vm --type swaths
+
+# Set update to Done
+update_status "rasterize_swaths" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
+
+
+def _google_vm_create_raster(status_col, contract_alias, type, annotate=None):
+
+    if annotate is None:
+        annotate_str = ""
+    elif annotate == "graph":
+        annotate_str = '--annotate "graph"'
+    else:
+        raise SyntaxError("Invalid annotate argument")
 
     shell_script_content = _google_vm_base(contract_alias) + f"""
 # Run each stage
 echo "starting create-raster"
-run_docker "create-raster" --raster-type "clusters" --annotate "graph"
+run_docker "create-raster" --raster-type "{type}" {annotate_str}
 
-update_status "create_raster_1" "Done"
+update_status "{status_col}" "Done"
 echo "All stages completed successfully."
     """
     return shell_script_content
@@ -324,6 +350,7 @@ def generate_shell_script(contract_alias, machine, shell_template_id, **kwargs):
         func_map = {'initialize_and_crop': _google_vm_init_and_crop, 
                     'featurize': _google_vm_featurize,
                     'swath_breaks': _google_vm_swath_breaks,
+                    'create_raster_swaths': _google_vm_create_raster_swaths,
                     'stitch_across': _google_vm_stitch_across,
                     'initialize_graph': _google_vm_refine_and_init_graph,
                     'create_raster_1': _google_vm_create_raster,
