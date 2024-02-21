@@ -85,7 +85,7 @@ def _google_vm_base(contract_alias):
 # Function to run docker and check for errors
 run_docker() {{
     local stage_name="$1"
-    local container_name="NCAP_DOS_126_NG_${{stage_name}}"
+    local container_name="{contract_alias}_${{stage_name}}"
 
     # Check if the container already exists
     if sudo docker ps -a --format '{{{{.Names}}}}' | grep -q "^${{container_name}}$"; then
@@ -119,6 +119,41 @@ run_docker() {{
     fi
 }}
 
+# Function to update the status in the status Google Sheet
+update_status() {{
+    local column="$1"
+    local value="$2"
+    local container_name="{contract_alias}_update_status"
+
+    # Check if the container already exists
+    if sudo docker ps -a --format '{{{{.Names}}}}' | grep -q "^${{container_name}}$"; then
+        # Check if the container is running
+        if sudo docker ps --format '{{{{.Names}}}}' | grep -q "^${{container_name}}$"; then
+            echo "Error: Container ${{container_name}} is still running."
+            exit 1
+        else
+            # Remove the stopped container
+            sudo docker rm "${{container_name}}"
+        fi
+    fi
+
+    # Run the Docker container to execute the update status script
+    sudo docker run --name "${{container_name}}" \\
+        --mount type=bind,source={vm_paths['services_repo']},target={docker_paths['services_repo']} \\
+        stitching-services \\
+        python3 {docker_paths['services_repo']}/Local/update_status.py \\
+        --contract_alias {contract_alias} \\
+        --machine google_vm \\
+        --username jeffreyclark \\
+        --column "${{column}}" \\
+        --value "${{value}}"
+
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "Error: Container for updating status failed with exit code $exit_code."
+        exit $exit_code
+    fi
+}}
     """
     return shell_script_base
 
@@ -134,6 +169,7 @@ run_docker "crop"
 echo "starting inspect-cropping"
 run_docker "inspect-cropping"
 
+update_status "init_and_crop" "Done"
 echo "All stages completed successfully."
     """
     return shell_script_content
@@ -145,6 +181,7 @@ def _google_vm_featurize(contract_alias):
 echo "starting feautrization"
 run_docker "featurize"
 
+update_status "featurize" "Done"
 echo "All stages completed successfully."
     """
     return shell_script_content
@@ -156,6 +193,7 @@ def _google_vm_swath_breaks(contract_alias):
 echo "starting swath-breaks"
 run_docker "swath-breaks"
 
+update_status "swath_breaks" "Done"
 echo "All stages completed successfully."
     """
     return shell_script_content
@@ -168,6 +206,7 @@ def _google_vm_stitch_across(contract_alias):
 echo "starting stitch-across"
 run_docker "stitch-across"
 
+update_status "stitch_across" "Done"
 echo "All stages completed successfully."
     """
     return shell_script_content
@@ -189,6 +228,7 @@ run_docker "opt-links"
 echo "starting global-opt"
 run_docker "global-opt"
 
+update_status "initialize_graph" "Done"
 echo "All stages completed successfully."
     """
     return shell_script_content
@@ -201,6 +241,7 @@ def _google_vm_create_raster(contract_alias):
 echo "starting create-raster"
 run_docker "create-raster" --raster-type "clusters" --annotate "graph"
 
+update_status "create_raster_1" "Done"
 echo "All stages completed successfully."
     """
     return shell_script_content
@@ -275,8 +316,9 @@ echo "All stages completed successfully."
 def generate_shell_script(contract_alias, machine, shell_template_id, **kwargs):
 
     if machine.lower() == "savio":
-        func_map = {1: _savio_init_and_crop, 
-                    2: _savio_featurize}
+        func_map = {'initialize_and_crop': _savio_init_and_crop, 
+                    'featurize': _savio_featurize
+                    }
         
     elif machine.lower() == "google_vm":
         func_map = {'initialize_and_crop': _google_vm_init_and_crop, 
