@@ -36,7 +36,7 @@ def deserialize_from_google_sheet(data):
     except (json.JSONDecodeError, TypeError):
         return data
 
-def generate_default_config_data(df):
+def generate_default_config_data(df, machine):
 
     if 'path' in df:
         folders_list = df.path.values.tolist()  # Convert to a standard Python list if it's a pandas Series
@@ -48,8 +48,6 @@ def generate_default_config_data(df):
     config_data = {
         "alg_kwargs": {"hessian_threshold": 100},
         "algorithm": "SURF",
-        "pool_workers": 30,
-        "surf_workers": 15,
         "cropping_parameters": {
             "b_lg": 1,
             "clip_long_side": 0.04818053378598765,
@@ -110,8 +108,14 @@ def generate_default_config_data(df):
         "raster_edge_constraint_type": "max"
     }
 
-    return config_data
+    if machine.lower() == "savio":
+        config_data['pool_workers'] = 40
+        config_data['surf_workers'] = 8
+    elif machine.lower() == "google_vm":
+        config_data['pool_workers'] = 30
+        config_data['surf_workers'] = 6
 
+    return config_data
 
 
 def config_format(config_data):

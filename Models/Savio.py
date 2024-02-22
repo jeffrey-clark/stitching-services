@@ -148,6 +148,19 @@ class SavioClient:
             raise error
         return output
     
+
+    @ensure_connection('shell')
+    def _execute_command_capture_error(self, command, directory=None):
+        if directory:
+            command = f"cd {directory} && {command}"
+        stdin, stdout, stderr = self.ssh.exec_command(command)
+        output = stdout.read().decode('utf-8')
+        error = stderr.read().decode('utf-8')
+        return output, error
+
+
+
+
     @ensure_connection('shell')
     def get_job_list(self):
         sq = self.execute_command("sq")
@@ -203,6 +216,26 @@ class SavioClient:
             print("Download complete.")
         except Exception as e:
             print(f"An error occurred during file download: {e}")
+            raise e
+        
+    @ensure_connection('ftp')
+    def delete_files_sftp(self, file_paths):
+        """
+        Deletes multiple files from the remote server using SFTP.
+
+        Args:
+            file_paths (list of str): The file paths of the files to be deleted on the remote server.
+        """
+         # Ensure file_paths is a list
+        if not isinstance(file_paths, list):
+            raise TypeError("file_paths must be a list.")
+
+        try:
+            for fp in file_paths:
+                self.sftp.remove(fp)
+                print(f"File {fp} deleted successfully.")
+        except Exception as e:
+            print(f"An error occurred during file deletion: {e}")
             raise e
 
 

@@ -167,7 +167,7 @@ class GoogleSheet:
 
 
 config_columns = [
-            'contract_name', 'alg_kwargs', 'algorithm', 'pool_workers', 'surf_workers', 
+            'contract_name', 'machine', 'alg_kwargs', 'algorithm', 'pool_workers', 'surf_workers', 
             'cropping_parameters', 'cropping_std_threshold', 'cropping_filter_sigma',
             'cropping_origin', 'cropping_mode', 'crs', 'folders', 'hessian_threshold',
             'lowe_ratio', 'min_inliers','min_matches', 'min_swath_size', 'ransac_reproj_threshold',
@@ -192,12 +192,24 @@ class ConfigSheet(GoogleSheet):
 
         self.initialize_columns()
 
-    def find_contract_row(self, contract_name):
+    def find_contract_row(self, contract_name, machine):
         try:
-            contract_col = self.worksheet.col_values(1)
-            return contract_col.index(contract_name) + 1  # +1 because spreadsheet rows are 1-indexed
-        except ValueError:
+            # Get all values in the worksheet (assuming the first row contains headers)
+            all_values = self.worksheet.get_all_values()
+
+            # Check if the first row contains 'contract_name' and 'machine' columns
+            if 'contract_name' in all_values[0] and 'machine' in all_values[0]:
+                contract_name_index = all_values[0].index('contract_name')
+                machine_index = all_values[0].index('machine')
+
+                # Iterate over each row (starting from the second row)
+                for i, row in enumerate(all_values[1:], start=2):  # start=2 for 1-indexed row numbers
+                    # Check if both 'contract_name' and 'machine' match
+                    if len(row) > max(contract_name_index, machine_index) and \
+                            row[contract_name_index] == contract_name and row[machine_index] == machine:
+                        return i  # Row number where both match
             return None
+
         except Exception as e:
             print(f"Error finding contract row: {e}")
             raise
@@ -257,7 +269,7 @@ class ConfigSheet(GoogleSheet):
             print(f"Error checking for existing contract: {e}")
             raise
 
-    def add_contract(self, contract_name, config_data):
+    def add_contract(self, contract_name, machine, config_data):
         if self.contract_exists(contract_name):
             print(f"Contract '{contract_name}' already exists. Aborting addition.")
             return
@@ -278,19 +290,22 @@ class ConfigSheet(GoogleSheet):
 
                 new_row_values[index] = serialized_value
 
-        # Insert the contract name at the appropriate place
-        if 'contract_name' in column_headers:
-            contract_name_index = column_headers.index('contract_name')
-            new_row_values[contract_name_index] = contract_name
+        # Insert the contract name and machine at the appropriate place
+        extra_cols = {'contract_name': contract_name, 'machine': machine}
+
+        for key, value in extra_cols.items():
+            if key in column_headers:
+                index = column_headers.index(key)
+                new_row_values[index] = value
 
         # Add the new row to the worksheet
         self.worksheet.append_row(new_row_values)
         print(f"Contract '{contract_name}' added.")
 
 
-    def get_config(self, contract_name):
+    def get_config(self, contract_name, machine):
         # Retrieve configuration data for the specified contract
-        row_id = self.find_contract_row(contract_name)
+        row_id = self.find_contract_row(contract_name, machine)
         if row_id is None:
             print(f"Contract '{contract_name}' not found.")
             return
@@ -317,7 +332,7 @@ class ConfigSheet(GoogleSheet):
     
 
     def export_config(self, contract_name, country, machine_name):
-        config_data = self.get_config(contract_name)
+        config_data = self.get_config(contract_name, machine_name)
         return export_config_file(contract_name, country, config_data, machine_name)
 
 
