@@ -27,10 +27,10 @@ status_db = StatusSheet(cfg['google_drive']['config_files']['id'], "status")
 
 def get_contract_status_object(contract_alias, machine):
     # load in the status object as contract_status
-    exists = status_db.contract_exists(contract_alias, machine, cfg['savio']['username'])
+    exists = status_db.contract_exists(contract_alias, machine, cfg[machine]['username'])
     if not exists:
         status_db.add_contract(contract_alias, machine, cfg[machine]['username'])
-    contract_status = Status(status_db, contract_alias, machine, cfg['savio']['username'])
+    contract_status = Status(status_db, contract_alias, machine, cfg[machine]['username'])
     return contract_status
 
 
@@ -51,7 +51,6 @@ def upload_conifg_sheet_entry(contract_alias, contract, machine):
 
 
 def upload_images(country, contract_alias, contract, contract_status):
-
     if contract_status.data['image_upload'] != "Done":
 
         if contract_status.machine == "savio":
@@ -436,6 +435,36 @@ def run_pipeline(contract_status, stage, required_stage):
 
 
 
+def rasterize_clusters(contract_status):
+    
+    status = contract_status.data
+    machine = status['machine']
+    contract_alias = status['contract']
+
+    if status['initialize_graph'] != "Done":
+        raise RuntimeError("You need to finish the initialize_graph stage")
+    if status['create_raster_1'] != "Done":
+        
+        # export the shell script
+        shell_fp = generate_shell_script(contract_alias, machine, 'create_raster_clusters')
+
+        if machine == "savio":
+            s = SavioClient()
+
+        elif machine == "google_vm":
+            vm = VMClient()
+
+            # export and upload the shell script
+            shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
+
+            vm.upload_files_sftp([shell_fp], [shell_fp_remote])
+            # execute the command in a tmux session
+            vm.send_tmux_command(f"{contract_alias}_rasterize_swaths", f"bash {shell_fp_remote}")
+            print(f"Command sent to {machine}: rasterize_swaths")
+
+        contract_status.update_status('rasterize_clusters', f"Submitted")
+
+
 def download_clusters(contract_status, stage, required_stage):
 
     status = contract_status.data
@@ -450,15 +479,18 @@ def download_clusters(contract_status, stage, required_stage):
                 s = SavioClient()
 
         elif machine == "google_vm":
-            vm = VMClient()
+            b = GoogleBucket()
 
             bucket_results_folder = os.path.join(cfg['bucket']['root'], "results", contract_alias)
 
-            bucket_files_fps = [x for x in vm.listdir_bucket(bucket_results_folder) if not x.endswith("/")]
+            bucket_files_fps = [x for x in b.listdir_bucket(bucket_results_folder) if not x.endswith("/")]
             local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
             os.makedirs(os.path.dirname(local_results_folder), exist_ok=True)
 
-            vm.download_from_bucket(bucket_files_fps, local_results_folder)
+
+            print(bucket_files_fps)
+            print(local_results_folder)
+            b.download_files_from_bucket(bucket_files_fps, local_results_folder)
 
         contract_status.update_status(stage, f"Done")
 
@@ -585,10 +617,12 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
     run_pipeline(contract_status, "initialize_graph", "stitch_across")
 
     # Step 11: Create Raster
-    run_pipeline(contract_status, "create_raster_1", "initialize_graph")
+    # run_pipeline(contract_status, "create_raster_1", "initialize_graph")
+    rasterize_clusters(contract_status)
+
 
     # Step 12: Download Rasters
-    download_clusters(contract_status, "download_clusters_1", "create_raster_1")
+    # download_clusters(contract_status, "download_clusters_1", "create_raster_1")
 
     # Step 13: New Neighbors
     #new_neighbors(contract_status, "new_neighbors", "create_raster_1")
@@ -601,20 +635,20 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
 
 if __name__ == "__main__":
 
-    # ----- ON SAVIO -----
+    # # ----- ON SAVIO -----
 
-    country = "Nigeria"
-    contract_name = "NCAP_DOS_SHELL_BP"
-    # contract_name = "NCAP_DOS_USAAF_1"
+    # country = "Nigeria"
+    # contract_name = "NCAP_DOS_SHELL_BP"
+    # # contract_name = "NCAP_DOS_USAAF_1"
 
-    main(contract_name, country, "savio")
+    # main(contract_name, country, "savio")
 
 
 
     # ----- ON GOOGLE VM -----
 
-    # country = "Nigeria"
-    # # contract_name = "NCAP_DOS_126_NG"
-    # contract_name = "NCAP_DOS_CAS_FI"
-    # # contract_alias = "test"
-    # main(contract_name, country, "google_vm") # , contract_alias=contract_alias)
+    country = "Nigeria"
+    # contract_name = "NCAP_DOS_126_NG"
+    contract_name = "NCAP_DOS_CAS_FI"
+    # contract_alias = "test"
+    main(contract_name, country, "google_vm") # , contract_alias=contract_alias)

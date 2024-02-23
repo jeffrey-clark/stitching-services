@@ -253,6 +253,24 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
+def _google_vm_create_raster_clusters(contract_alias):
+
+    vm_run_shell = os.path.join(cfg['google_vm']['vm_paths']['services_repo'], "VM/run.sh")
+
+    shell_script_content = _google_vm_base(contract_alias) + f"""
+# Create the cluster rasters
+echo "starting create-raster"
+run_docker "create-raster" --raster-type "clusters" --annotate "graph"
+
+# organize the swats in folder
+
+# Set update to Done
+update_status "create_raster_1" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
+
+
 def _google_vm_create_raster(status_col, contract_alias, type, annotate=None):
 
     if annotate is None:
@@ -353,7 +371,7 @@ def generate_shell_script(contract_alias, machine, shell_template_id, **kwargs):
                     'create_raster_swaths': _google_vm_create_raster_swaths,
                     'stitch_across': _google_vm_stitch_across,
                     'initialize_graph': _google_vm_refine_and_init_graph,
-                    'create_raster_1': _google_vm_create_raster,
+                    'create_raster_clusters': _google_vm_create_raster_clusters,
                     'new_neighbors': _google_vm_new_neighbors,
                     'export_georef': _google_vm_export_georef
                     }
