@@ -36,14 +36,14 @@ class GoogleBucket:
             Converts Tabei directory paths to Savio directory paths.
 
             :param directories: List of Tabei directory paths
-            :param country: Country name for the Savio directory structure
-            :return: List of tuples (local_directory, savio_directory)
+            :param country: Country name for the Bucket directory structure
+            :return: List of tuples (local_directory, bucket_directory)
             """
 
             directory_mappings = []
             for directory in directories:
                 folder_name = os.path.basename(directory.rstrip('/'))
-                bucket_path = os.path.join(cfg['bucket']['root'], country, folder_name)
+                bucket_path = os.path.join(cfg['bucket']['images'], country, folder_name)
                 directory_mappings.append((directory, bucket_path))
             return directory_mappings
         

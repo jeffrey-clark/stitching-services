@@ -6,13 +6,21 @@ import inspect
 cfg = u.read_config()
 
 
-def _savio_init_and_crop(contract_alias):
+def _savio_base(contract_status, slurm_suffix, time_limit):
+    contract_alias = contract_status.contract_alias
+    username = contract_status.user  # Assuming 'user' attribute exists within contract_status
+    savio_cfg = cfg['savio']  # Assuming cfg is a global variable that includes configuration for Savio
 
-    config_path = os.path.join(cfg['savio']['config_folder'], f"{contract_alias}.yml")
+    config_path = os.path.join(savio_cfg['config_folder'], f"{contract_alias}.yml")
+    resources_folder = savio_cfg['resources_folder']
+    stitching_services_sif = os.path.join(resources_folder, "stitching-services.sif")
+    ahp_repo = os.path.join(savio_cfg['repos'], "aerial-history-stitching")
+    services_repo = os.path.join(savio_cfg['repos'], "stitching-services")
 
-    shell_script_content = f"""#!/bin/bash
+
+    shell_script_base = f"""#!/bin/bash
 # Job name:
-#SBATCH --job-name={contract_alias}_stage_1     
+#SBATCH --job-name={contract_alias}_{slurm_suffix}
 #
 # Account:
 #SBATCH --account=co_laika
@@ -21,59 +29,90 @@ def _savio_init_and_crop(contract_alias):
 #SBATCH --partition=savio3
 #
 # Wall clock limit:
-#SBATCH --time=02:00:00
+#SBATCH --time={time_limit}
 #
-## Command(s) to run:
-singularity run /global/home/groups/co_laika/ahp/surf.sif \\
-    python3 /global/home/users/jeffreyclark/repos/aerial-history-stitching/main.py \\
-    --config {config_path} \\
-    --stage initialize 
+#
+run_docker() {{
+    local stage="$1"
+    shift  # Shift the first argument so that "$@" can be used for additional arguments
+    
+    singularity run /global/home/groups/co_laika/ahp/surf.sif \\
+        python3 {os.path.join(ahp_repo, "main.py")} \\
+        --config {config_path} \\
+        --stage "$stage" \\
+        "$@"
 
-singularity run /global/home/groups/co_laika/ahp/surf.sif \\
-    python3 /global/home/users/jeffreyclark/repos/aerial-history-stitching/main.py \\
-    --config {config_path} \\
-    --stage crop 
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "Error: Singularity container for stage '$stage' failed with exit code $exit_code."
+        exit $exit_code
+    fi
 
-singularity run /global/home/groups/co_laika/ahp/surf.sif \\
-    python3 /global/home/users/jeffreyclark/repos/aerial-history-stitching/main.py \\
-    --config {config_path} \\
-    --stage inspect-cropping 
+}}
+
+# Function to update the status in the status Google Sheet using Singularity
+update_status() {{
+    local column="$1"
+    local value="$2"
+
+    singularity run {stitching_services_sif} \\
+        python3 {os.path.join(services_repo, "Local/update_status.py")} \\
+        --contract_alias {contract_alias} \\
+        --machine savio \\
+        --username {username} \\
+        --column "${{column}}" \\
+        --value "${{value}}"
+
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "Error: Container for updating status failed with exit code $exit_code."
+        exit $exit_code
+    fi
+}}
+# Placeholder for any additional common setup or functions
 """
+    return shell_script_base
+
+
+def _savio_init_and_crop(contract_status):
+    shell_script_content = _savio_base(contract_status, "stage_1", "02:00:00") + f"""
+# Run each stage
+echo "starting initialize"
+run_docker "initialize"
+echo "starting crop"
+run_docker "crop"
+echo "starting inspect-cropping"
+run_docker "inspect-cropping"
+
+update_status "init_and_crop" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
+
+
+def _savio_featurize(contract_status):
+    shell_script_content = _savio_base(contract_status, "stage_2", "24:00:00") + f"""
+# Run each stage
+echo "starting feautrization"
+run_docker "featurize"
+
+update_status "featurize" "Done"
+echo "All stages completed successfully."
+    """
     return shell_script_content
 
 
 
-def _savio_featurize(contract_alias):
-
-    config_path = os.path.join(cfg['savio']['config_folder'], f"{contract_alias}.yml")
-
-    shell_script_content = f"""#!/bin/bash
-# Job name:
-#SBATCH --job-name={contract_alias}_stage_2 
-#
-# Account:
-#SBATCH --account=co_laika
-#
-# Partition:
-#SBATCH --partition=savio3
-#
-# Wall clock limit:
-#SBATCH --time=24:00:00
-#
-## Command(s) to run:
-singularity run /global/home/groups/co_laika/ahp/surf.sif \\
-    python3 /global/home/users/jeffreyclark/repos/aerial-history-stitching/main.py \\
-    --config {config_path} \\
-    --stage featurize 
-"""
-    return shell_script_content
 
 
 
 
 
 
-def _google_vm_base(contract_alias):
+def _google_vm_base(contract_status):
+
+    contract_alias = contract_status.contract_alias
+    username = contract_status.user
 
     vm_paths = cfg['google_vm']['vm_paths']
     docker_paths = cfg['google_vm']['docker_paths']
@@ -144,7 +183,7 @@ update_status() {{
         python3 {docker_paths['services_repo']}/Local/update_status.py \\
         --contract_alias {contract_alias} \\
         --machine google_vm \\
-        --username jeffreyclark \\
+        --username {username} \\
         --column "${{column}}" \\
         --value "${{value}}"
 
@@ -159,8 +198,8 @@ update_status() {{
 
 
 
-def _google_vm_init_and_crop(contract_alias):
-    shell_script_content = _google_vm_base(contract_alias) + f"""
+def _google_vm_init_and_crop(contract_status):
+    shell_script_content = _google_vm_base(contract_status) + f"""
 # Run each stage
 echo "starting initialize"
 run_docker "initialize"
@@ -175,8 +214,8 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
-def _google_vm_featurize(contract_alias):
-    shell_script_content = _google_vm_base(contract_alias) + f"""
+def _google_vm_featurize(contract_status):
+    shell_script_content = _google_vm_base(contract_status) + f"""
 # Run each stage
 echo "starting feautrization"
 run_docker "featurize"
@@ -187,8 +226,8 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
-def _google_vm_swath_breaks(contract_alias):
-    shell_script_content = _google_vm_base(contract_alias) + f"""
+def _google_vm_swath_breaks(contract_status):
+    shell_script_content = _google_vm_base(contract_status) + f"""
 # Run each stage
 echo "starting swath-breaks"
 run_docker "swath-breaks"
@@ -200,8 +239,8 @@ echo "All stages completed successfully."
 
 
 
-def _google_vm_stitch_across(contract_alias):
-    shell_script_content = _google_vm_base(contract_alias) + f"""
+def _google_vm_stitch_across(contract_status):
+    shell_script_content = _google_vm_base(contract_status) + f"""
 ## Run each stage
 echo "starting stitch-across"
 run_docker "stitch-across"
@@ -212,9 +251,9 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
-def _google_vm_refine_and_init_graph(contract_alias):
+def _google_vm_refine_and_init_graph(contract_status):
 
-    shell_script_content = _google_vm_base(contract_alias) + f"""
+    shell_script_content = _google_vm_base(contract_status) + f"""
 # Run each stage
 echo "starting refine-links"
 run_docker "refine-links"
@@ -234,11 +273,12 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
-def _google_vm_create_raster_swaths(contract_alias):
+def _google_vm_create_raster_swaths(contract_status):
 
     vm_run_shell = os.path.join(cfg['google_vm']['vm_paths']['services_repo'], "VM/run.sh")
+    contract_alias = contract_status.contract_alias
 
-    shell_script_content = _google_vm_base(contract_alias) + f"""
+    shell_script_content = _google_vm_base(contract_status) + f"""
 # Create the swath rasters
 echo "starting create-raster"
 run_docker "create-raster" --raster-type "swaths" 
@@ -253,11 +293,11 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
-def _google_vm_create_raster_clusters(contract_alias):
+def _google_vm_create_raster_clusters(contract_status):
 
     vm_run_shell = os.path.join(cfg['google_vm']['vm_paths']['services_repo'], "VM/run.sh")
 
-    shell_script_content = _google_vm_base(contract_alias) + f"""
+    shell_script_content = _google_vm_base(contract_status) + f"""
 # Create the cluster rasters
 echo "starting create-raster"
 run_docker "create-raster" --raster-type "clusters" --annotate "graph"
@@ -271,33 +311,34 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
-def _google_vm_create_raster(status_col, contract_alias, type, annotate=None):
+# def _google_vm_create_raster(status_col, contract_alias, type, annotate=None):
 
-    if annotate is None:
-        annotate_str = ""
-    elif annotate == "graph":
-        annotate_str = '--annotate "graph"'
-    else:
-        raise SyntaxError("Invalid annotate argument")
+#     if annotate is None:
+#         annotate_str = ""
+#     elif annotate == "graph":
+#         annotate_str = '--annotate "graph"'
+#     else:
+#         raise SyntaxError("Invalid annotate argument")
 
-    shell_script_content = _google_vm_base(contract_alias) + f"""
-# Run each stage
-echo "starting create-raster"
-run_docker "create-raster" --raster-type "{type}" {annotate_str}
+#     shell_script_content = _google_vm_base(contract_alias) + f"""
+# # Run each stage
+# echo "starting create-raster"
+# run_docker "create-raster" --raster-type "{type}" {annotate_str}
 
-update_status "{status_col}" "Done"
-echo "All stages completed successfully."
-    """
-    return shell_script_content
+# update_status "{status_col}" "Done"
+# echo "All stages completed successfully."
+#     """
+#     return shell_script_content
 
 
-def _google_vm_new_neighbors(contract_alias, ids):
+def _google_vm_new_neighbors(contract_status, ids):
 
+    contract_alias = contract_status.contract_alias
     vm_paths = cfg['google_vm']['vm_paths']
     docker_paths = cfg['google_vm']['docker_paths']
     config_path = os.path.join(docker_paths['stitching_repo'], "config", f"{contract_alias}.yml")
         
-    shell_script_content = _google_vm_base(contract_alias) + f"""
+    shell_script_content = _google_vm_base(contract_status) + f"""
 # Run each stage
 echo "starting new neighbors for "
 run_docker "new-neighbors" --ids {ids} 
@@ -307,12 +348,14 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
-def _google_vm_export_georef(contract_alias, ids):
+def _google_vm_export_georef(contract_status, ids):
+
+    contract_alias = contract_status.contract_alias
 
     docker_paths = cfg['google_vm']['docker_paths']
     config_path = os.path.join(docker_paths['stitching_repo'], "config", f"{contract_alias}.yml")
 
-    shell_script_content = _google_vm_base(contract_alias) + f"""
+    shell_script_content = _google_vm_base(contract_status) + f"""
 run_collect_and_zip() {{
     local container_name="{contract_alias}_collect_and_zip"
 
@@ -357,7 +400,10 @@ echo "All stages completed successfully."
 
 
 
-def generate_shell_script(contract_alias, machine, shell_template_id, **kwargs):
+def generate_shell_script(contract_status, shell_template_id, **kwargs):
+
+    contract_alias = contract_status.contract_alias
+    machine = contract_status.machine
 
     if machine.lower() == "savio":
         func_map = {'initialize_and_crop': _savio_init_and_crop, 
@@ -376,7 +422,7 @@ def generate_shell_script(contract_alias, machine, shell_template_id, **kwargs):
                     'export_georef': _google_vm_export_georef
                     }
     else:
-        raise ValueError('ONLY SAVIO SO FAR')
+        raise ValueError('Specified machine is not supported')
     
     func = func_map[shell_template_id]
     func_sig = inspect.signature(func)
@@ -394,7 +440,7 @@ def generate_shell_script(contract_alias, machine, shell_template_id, **kwargs):
     os.makedirs(os.path.dirname(fp), exist_ok=True)
 
     with open(fp, "w") as file:
-        file.write(func(contract_alias, **func_args))
+        file.write(func(contract_status, **func_args))
 
     return fp
 

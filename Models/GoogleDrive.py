@@ -175,7 +175,8 @@ config_columns = [
             'subsample_swath', 'early_stopping', 'across_swath_threshold', 'response_threshold',
             'cluster_inlier_threshold', 'cluster_link_method', 'individual_link_threshold',
             'artifact_angle_threshold', 'soft_break_threshold', 'soft_individual_threshold',
-            'optim_inclusion_threshold', 'n_within', 'n_across', 'n_swath_neighbors', 'retry_threshold',
+            'optim_inclusion_threshold', 'inlier_threshold', 'suspect_artifacts',	'strict_inlier_threshold',	
+            'optim_inlier_threshold', 'n_within', 'n_across', 'n_swath_neighbors', 'retry_threshold',
             'n_iter', 'optim_lr_theta', 'optim_lr_scale', 'optim_lr_xy', 'raster_edge_size',
             'raster_edge_constraint_type', 'collection_regex'
         ]
@@ -496,9 +497,9 @@ class StatusSheet(GoogleSheet):
 
 
 class Status:
-    def __init__(self, status_sheet, contract_name, machine, user):
+    def __init__(self, status_sheet, contract_alias, machine, user):
         self.status_sheet = status_sheet
-        self.contract_name = contract_name
+        self.contract_alias = contract_alias
         self.machine = machine
         self.user = user
         self.data = self.refresh_status()
@@ -507,14 +508,14 @@ class Status:
         """
         Refreshes the status data from the StatusSheet.
         """
-        return self.status_sheet.get_full_status(self.contract_name, self.machine, self.user)
+        return self.status_sheet.get_full_status(self.contract_alias, self.machine, self.user)
 
     def get_status(self, column_name=None):
         """
         Gets the status for the specified column or the entire status if no column is specified.
         """
         if column_name:
-            return self.status_sheet.get_status(self.contract_name, self.machine, self.user, column_name)
+            return self.status_sheet.get_status(self.contract_alias, self.machine, self.user, column_name)
         else:
             return self.refresh_status()
 
@@ -522,14 +523,14 @@ class Status:
         """
         Updates the status for a specified column.
         """
-        self.status_sheet.update_status(self.contract_name, self.machine, self.user, column_name, status)
+        self.status_sheet.update_status(self.contract_alias, self.machine, self.user, column_name, status)
         self.refresh_status()  # Refresh the status data after update
 
     def update_status_multiple(self, status_updates):
         """
         Updates multiple statuses.
         """
-        self.status_sheet.update_status_multiple(self.contract_name, self.machine, self.user, status_updates)
+        self.status_sheet.update_status_multiple(self.contract_alias, self.machine, self.user, status_updates)
         self.refresh_status()  # Refresh the status data after updates
 
 

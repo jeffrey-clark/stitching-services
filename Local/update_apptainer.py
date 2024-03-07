@@ -32,6 +32,8 @@ def get_last_modified_time(file_path):
 
 
 def upload_image_to_savio():
+    raise RuntimeError("SEE IF YOU CAN AUTOMATE THE CONVERSION OF DOCKER IMAGE .tar to APPTAINER CONTAINER SHOULD BE SHELL COMMAND of what is manually specified in the readme")
+
     s = SavioClient()
 
     dockerimage_path = os.path.join(root_dir, "Files/stitching-services.tar")
@@ -88,6 +90,7 @@ def update_docker():
         upload_image_to_savio()
     else:
         print("Docker image is up-to-date.")
+
 
 if __name__ == "__main__":
     update_docker()

@@ -21,6 +21,7 @@ from Models.Tabei import TabeiClient
 import Functions.utilities as u
 from Models.Contract import Country
 import zipfile
+import shutil
 
 
 cfg = u.read_config()
@@ -49,9 +50,16 @@ def download_thumbnails(country, contract_name):
 
     # Extract the zip file
     extract_folder = os.path.join(thumb_local, contract_name)
-    os.mkdir(extract_folder)
+ 
+    # Check if the folder exists
+    if os.path.exists(extract_folder):
+        shutil.rmtree(extract_folder)  # Deletes the folder and all its contents
+        print(f"Deleted existing folder {extract_folder}.")
+
+    os.makedirs(extract_folder)  # Creates the folder
     with zipfile.ZipFile(thumb_zip_local, 'r') as zip_ref:
         zip_ref.extractall(extract_folder)
+    print(f"Extracted thumbnails to {extract_folder}.")
 
     # Delete the zip file
     os.remove(thumb_zip_local)

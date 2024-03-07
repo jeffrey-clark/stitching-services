@@ -21,7 +21,7 @@ import os
 import subprocess
 
 import Functions.utilities as u
-from Models.GoogleVM import VMClient
+from Models.GoogleBucket import GoogleBucket
 
 cfg = u.read_config()
 
@@ -102,14 +102,14 @@ def upload_images_savio(contract_alias, folders, country, pwd, t, s):
 
 
 
-def compare_folder_tabei_bucket(folders, country, t, vm):
+def compare_folder_tabei_bucket(folders, country, t, b):
     print("  Fetching filesizes from Tabei:")
     tabei_sizes = t.get_folder_total_sizes(folders)
 
     print("  Fetching filesizes from Google Bucket:")
-    bucket_directory_mappings = vm.convert_to_bucket_paths(folders, country)
+    bucket_directory_mappings = b.convert_to_bucket_paths(folders, country)
     bucket_paths = [bucket_path for _, bucket_path in bucket_directory_mappings]
-    bucket_sizes = vm.get_bucket_folders_total_sizes(bucket_paths)
+    bucket_sizes = b.get_bucket_folders_total_sizes(bucket_paths)
 
     mismatched_folders = []
 
@@ -146,7 +146,7 @@ def compare_folder_tabei_bucket(folders, country, t, vm):
 
 
 
-def upload_images_bucket(contract_alias, folders, country, pwd, t, vm):
+def upload_images_bucket(contract_alias, folders, country, pwd, t, b, workers):
 
     tmux_name = f"{contract_alias}_upload"  # set the tmux name
     
@@ -158,7 +158,7 @@ def upload_images_bucket(contract_alias, folders, country, pwd, t, vm):
             # print("Upload is still ongoing. Please wait until complete.")
 
     # if there is no tmux session, we do filesize comparisons to verify correct upload
-    mismatched_folders_detailed = compare_folder_tabei_bucket(folders, country, t, vm)
+    mismatched_folders_detailed = compare_folder_tabei_bucket(folders, country, t, b)
     
     print("DETAILS:",mismatched_folders_detailed)
 
@@ -167,7 +167,7 @@ def upload_images_bucket(contract_alias, folders, country, pwd, t, vm):
     # Delete folders where there are discrpancies Something must have gone wrong
     # too_big = [x for x in mismatched_folders_detailed if int(x['tabei_size']) < int(x['bucket_size'])]
     if len(mismatched_folders_detailed) > 0:
-        vm.delete_from_bucket([x['bucket_key'] for x in mismatched_folders_detailed])
+        b.delete_from_bucket([x['bucket_key'] for x in mismatched_folders_detailed])
 
     if len(mismatched_folders) > 0:
         # prepare the tmux upload command
@@ -176,7 +176,7 @@ def upload_images_bucket(contract_alias, folders, country, pwd, t, vm):
         cmd_path_update = os.path.join(cfg['tabei']['stitching-services'], "Local/update_status.py") 
         folder_string = " ".join(mismatched_folders)
         set_password = f"export SAVIO_DECRYPTION_PASSWORD={pwd}"  # need to send the password for SavioClient decryption.
-        upload_command = f"{env_interpreter} {cmd_path_upload} --paths {folder_string} --country {country} --destination Bucket"
+        upload_command = f"{env_interpreter} {cmd_path_upload} --paths {folder_string} --country {country} --destination Bucket --workers {workers}"
         update_status_command = f"{env_interpreter} {cmd_path_update} --contract_alias {contract_alias} --machine google_vm --column image_upload --value Done"
         command = f"{set_password} && {upload_command} && {update_status_command}"
 
@@ -190,7 +190,7 @@ def upload_images_bucket(contract_alias, folders, country, pwd, t, vm):
 
 
 if __name__ == "__main__":
-    v = VMClient()
+    b = GoogleBucket()
 
     folders = [
         "/mnt/shackleton_shares/lab/aerial_history_project/Images/Nigeria/NCAP_DOS_SHELL_BP_0043/",
@@ -203,5 +203,5 @@ if __name__ == "__main__":
         "/mnt/shackleton_shares/lab/aerial_history_project/Images/Nigeria/NCAP_DOS_SHELL_BP_0051/",
     ]
 
-    filepaths = v.convert_to_bucket_paths(folders, "Nigeria")
+    filepaths = b.convert_to_bucket_paths(folders, "Nigeria")
 

@@ -96,6 +96,10 @@ def generate_default_config_data(df, machine):
         "soft_break_threshold": None,
         "soft_individual_threshold": 30,
         "optim_inclusion_threshold": 10,
+        "inlier_threshold": 50,
+        "suspect_artifacts": True,
+        "strict_inlier_threshold": 200,
+        "optim_inlier_threshold": 50,
         "n_within": 2,
         "n_across": 1,
         "n_swath_neighbors": 2,
@@ -164,6 +168,10 @@ def config_format(config_data):
         ("soft_individual_threshold", False),
         ("", False),
         ("optim_inclusion_threshold", False),
+        ("inlier_threshold", False),
+        ("suspect_artifacts", False),
+        ("strict_inlier_threshold", False),
+        ("optim_inlier_threshold", False),
         ("n_within", False),
         ("n_across", False),
         ("n_swath_neighbors", False),
@@ -236,7 +244,7 @@ def export_config_file(contract_name, country, config_data, machine_name):
             "img_cache_folder": os.path.join(dp['cache_folder'], contract_name, "SURF"),
             "checkpoint_cache_folder": os.path.join(dp['cache_folder'], contract_name),
             "raster_output_folder": os.path.join(dp['results_folder'], contract_name),
-            "swath_folder": os.path.join(dp['cache_folder'], contract_name),
+            "swath_folder": os.path.join(dp['cache_folder'], contract_name)
         }
     
     else:  # For 'tabei' and other machines

@@ -67,12 +67,12 @@ def upload_images(country, contract_alias, contract, contract_status):
             
         elif contract_status.machine == "google_vm":
             t = TabeiClient()
-            vm = VMClient()
+            b = GoogleBucket()
   
             folders = contract.df.path.to_list()
-
+            workers = cfg['bucket'].get("workers", 1)
             t.connect('shell')
-            upload_status = upload_images_bucket(contract_alias, folders, country, pwd, t, vm)
+            upload_status = upload_images_bucket(contract_alias, folders, country, pwd, t, b, workers)
             t.close()
 
             if upload_status != "Complete":
@@ -119,7 +119,7 @@ def regex_test(contract_alias, contract, contract_status):
                 failed_fps.append(fp)
 
         if len(failed_fps) > 0:
-            contract_status.update_status('regex_test', f"Failed: {failed_fps[0:2]}")
+            contract_status.update_status('regex_test', f"Failed: {len(failed_fps)} {failed_fps[0:10]}")
             raise ValueError("Images need custom regex. Update config file.")
         
         print("Images paassed regex test.")
@@ -138,6 +138,32 @@ def check_if_crop_finished(contract_status):
     if contract_status.data['crop_params'] != "Done":
         raise BrokenPipeError("You need to finish the manual cropping stage")
     
+def upload_config(contract_status, country):
+
+    machine = contract_status.machine
+    
+
+    # export the contract for savio
+    config_fp = config_db.export_config(contract_status.contract_alias, country, machine)
+    
+    if machine == "savio":
+        s = SavioClient()
+        
+        config_fp_remote = os.path.join(cfg[machine]['config_folder'], os.path.basename(config_fp))
+        
+        s.upload_files_sftp([config_fp], [config_fp_remote])
+
+    elif machine == "google_vm":
+        vm = VMClient()
+
+        config_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['stitching_repo'], "config", os.path.basename(config_fp))
+        
+        vm.upload_files_sftp([config_fp], [config_fp_remote])
+
+        # execute the command in a tmux session
+
+        print(f"Re-uploaded the config file")
+
 
 def initialize_and_crop(contract_alias, country, contract_status):
     
@@ -150,8 +176,8 @@ def initialize_and_crop(contract_alias, country, contract_status):
         
         # export the contract for savio
         config_fp = config_db.export_config(contract_alias, country, machine)
-        shell_fp = generate_shell_script(contract_alias, machine, 'initialize_and_crop')
-
+        shell_fp = generate_shell_script(contract_status, 'initialize_and_crop')
+ 
         if machine == "savio":
             s = SavioClient()
             
@@ -180,7 +206,6 @@ def initialize_and_crop(contract_alias, country, contract_status):
             print(f"Command sent to {machine}: Initialize, Crop and Inspect Cropping")
 
         contract_status.update_status('init_and_crop', f"Submitted")
-        exit()
 
 
 def download_cropping_sample(contract_alias, country, contract_status):
@@ -188,24 +213,30 @@ def download_cropping_sample(contract_alias, country, contract_status):
     status = contract_status.data
     machine = status['machine']
 
-    if status['download_cropping_sample'] != "Done":
+    if status['init_and_crop'] != "Done":
+        raise RuntimeError("You need to finish the initialize and cropping stage")
 
-        
-        local_fp = os.path.join(cfg['local']['results'], country, contract_alias, "cropping_sample.jpg")
+    if status['download_cropping_sample'] != "Done":
+     
+        local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
         # make sure that we have the local dir
-        os.makedirs(os.path.dirname(local_fp), exist_ok=True)
+        os.makedirs(local_results_folder, exist_ok=True)
 
         if machine == "savio":
             s = SavioClient()
-            remote_fp = os.path.join(cfg[machine]['results_folder'], contract_alias, "cropping_sample.jpg")
-            s.download_files_sftp([remote_fp], [local_fp])
+            results_folder = os.path.join(cfg['savio']['results_folder'], contract_alias)
+            results_files = s.listdir(results_folder)
+            savio_fps = [os.path.join(results_folder, x) for x in results_files if "cropping_sample" in x]
+            local_fps = [os.path.join(local_results_folder, x) for x in results_files if "cropping_sample" in x]
+            
+            s.download_files_sftp(savio_fps, local_fps)
 
         elif machine == "google_vm":
-            vm = VMClient()
-            remote_fp = os.path.join(cfg['google_vm']['vm_paths']['results_folder'], contract_alias, "cropping_sample.jpg")
-            vm.download_files_sftp([remote_fp], [local_fp])
-            #
-            #  CHANGE ABOVE SO THAT IT DOWNLOADS IMMEDIATELY FROM BUCKET INSTEAD THROUGH VM
+            # first find all the files called cropping_sample
+            b = GoogleBucket()
+            all_fps = b.listdir_bucket(os.path.join(cfg['bucket']['root'], "results", contract_alias))
+            bucket_fps = [x for x in all_fps if "cropping_sample" in x]
+            b.download_files_from_bucket(bucket_fps, local_results_folder)
 
 
         contract_status.update_status('download_cropping_sample', f"Done")
@@ -220,26 +251,25 @@ def featurize(contract_status):
         raise RuntimeError("You need to finish the initialize and cropping stage")
     if status['featurize'] != "Done":
         
-        
 
         if machine == "savio":
             s = SavioClient()
 
             # export and upload the shell script
-            shell_fp = generate_shell_script(contract_alias, machine, 'featurize')
+            shell_fp = generate_shell_script(contract_status, 'featurize')
             shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
 
             s.upload_files_sftp([shell_fp], [shell_fp_remote])
 
             # send execution command
-            # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+            s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
             print(f"Command sent to {machine}: Featurize")
 
         elif machine == "google_vm":
             vm = VMClient()
 
             # export and upload the shell script
-            shell_fp = generate_shell_script(contract_alias, machine, 'featurize')
+            shell_fp = generate_shell_script(contract_status, 'featurize')
             shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
 
             vm.upload_files_sftp([shell_fp], [shell_fp_remote])
@@ -259,17 +289,17 @@ def swath_breaks(contract_status):
     contract_alias = status['contract']
 
     if status['featurize'] != "Done":
-        raise RuntimeError("You need to finish the initialize and cropping stage")
+        raise RuntimeError("You need to finish the featurize stage")
     if status['swath_breaks'] != "Done":
         
         # export the shell script
-        shell_fp = generate_shell_script(contract_alias, machine, 'swath_breaks')
+        shell_fp = generate_shell_script(contract_status, 'swath_breaks')
 
         if machine == "savio":
             s = SavioClient()
 
             # # export and upload the shell script
-            # shell_fp = generate_shell_script(contract_alias, machine, 2)
+            # shell_fp = generate_shell_script(contract_status, 2)
             # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
 
             # s.upload_files_sftp([shell_fp], [shell_fp_remote])
@@ -303,7 +333,7 @@ def rasterize_swaths(contract_status):
     if status['rasterize_swaths'] != "Done":
         
         # export the shell script
-        shell_fp = generate_shell_script(contract_alias, machine, 'create_raster_swaths')
+        shell_fp = generate_shell_script(contract_status, 'create_raster_swaths')
 
         if machine == "savio":
             s = SavioClient()
@@ -369,7 +399,7 @@ def stitch_across(contract_status):
             s = SavioClient()
 
             # # export and upload the shell script
-            # shell_fp = generate_shell_script(contract_alias, machine, 2)
+            # shell_fp = generate_shell_script(contract_status, 2)
             # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
 
             # s.upload_files_sftp([shell_fp], [shell_fp_remote])
@@ -382,7 +412,7 @@ def stitch_across(contract_status):
             vm = VMClient()
 
             # export and upload the shell script
-            shell_fp = generate_shell_script(contract_alias, machine, 'stitch_across')
+            shell_fp = generate_shell_script(contract_status, 'stitch_across')
             shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
 
             vm.upload_files_sftp([shell_fp], [shell_fp_remote])
@@ -409,7 +439,7 @@ def run_pipeline(contract_status, stage, required_stage):
                 s = SavioClient()
 
                 # # export and upload the shell script
-                # shell_fp = generate_shell_script(contract_alias, machine, 2)
+                # shell_fp = generate_shell_script(contract_status, 2)
                 # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
 
                 # s.upload_files_sftp([shell_fp], [shell_fp_remote])
@@ -422,7 +452,7 @@ def run_pipeline(contract_status, stage, required_stage):
             vm = VMClient()
 
             # export and upload the shell script
-            shell_fp = generate_shell_script(contract_alias, machine, stage)
+            shell_fp = generate_shell_script(contract_status, stage)
             shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
 
             vm.upload_files_sftp([shell_fp], [shell_fp_remote])
@@ -446,7 +476,7 @@ def rasterize_clusters(contract_status):
     if status['create_raster_1'] != "Done":
         
         # export the shell script
-        shell_fp = generate_shell_script(contract_alias, machine, 'create_raster_clusters')
+        shell_fp = generate_shell_script(contract_status, 'create_raster_clusters')
 
         if machine == "savio":
             s = SavioClient()
@@ -518,7 +548,7 @@ def new_neighbors(contract_status, stage, required_stage):
             vm = VMClient()
 
             # export and upload the shell script
-            shell_fp = generate_shell_script(contract_alias, machine, stage, ids=cluster_ids)
+            shell_fp = generate_shell_script(contract_status, stage, ids=cluster_ids)
         #     shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
 
         #     vm.upload_files_sftp([shell_fp], [shell_fp_remote])
@@ -552,7 +582,7 @@ def export_for_georeferencing(contract_status):
             vm = VMClient()
 
             # export and upload the shell script
-            shell_fp = generate_shell_script(contract_alias, machine, 'export_georef', ids=cluster_ids)
+            shell_fp = generate_shell_script(contract_status, 'export_georef', ids=cluster_ids)
             shell_fp_remote = os.path.join(cfg['google_vm']['vm_paths']['shells_folder'], os.path.basename(shell_fp))
 
             vm.upload_files_sftp([shell_fp], [shell_fp_remote])
@@ -564,6 +594,27 @@ def export_for_georeferencing(contract_status):
 
         # contract_status.update_status(stage, f"Submitted")
 
+def download_cluster_selected_raws(contract_status):
+
+    status = contract_status.data
+    machine = status['machine']
+    contract_alias = status['contract']
+
+
+    local_raw_clusters = os.path.join(cfg['local']['results'], country, contract_alias, "clusters_w_raws")
+        # make sure that we have the local dir
+    os.makedirs(local_raw_clusters, exist_ok=True)
+
+
+    if machine == "savio":
+        s = SavioClient()
+
+    elif machine == "google_vm":
+        # first find all the files called cropping_sample
+        b = GoogleBucket()
+        all_fps = b.listdir_bucket(os.path.join(cfg['bucket']['root'], "results", contract_alias))
+        bucket_fps = [x for x in all_fps if "w_raws.tif" in x]
+        b.download_files_from_bucket(bucket_fps, local_raw_clusters)
 
 
 
@@ -577,6 +628,10 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
     contract = get_contract(country, contract_name, refresh_data_overview) # This is a contract object from the Data Overview
     contract_status = get_contract_status_object(contract_alias, machine)  # This is the Google Sheet Status Row
     upload_conifg_sheet_entry(contract_alias, contract, machine)  # Add a default config row in Google Sheet Config
+
+
+    # if you need to re-upload the config, uncomment this line
+    # upload_config(contract_status, country)
 
     # If Savio, make sure we have sinularity container
     if machine == "savio":
@@ -621,17 +676,18 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
     rasterize_clusters(contract_status)
 
 
-    # Step 12: Download Rasters
-    # download_clusters(contract_status, "download_clusters_1", "create_raster_1")
+    # # Step 12: Download Rasters
+    # # download_clusters(contract_status, "download_clusters_1", "create_raster_1")
 
-    # Step 13: New Neighbors
-    #new_neighbors(contract_status, "new_neighbors", "create_raster_1")
+    # # Step 13: New Neighbors
+    # #new_neighbors(contract_status, "new_neighbors", "create_raster_1")
 
 
     # Export for georeferencing
-    export_for_georeferencing(contract_status)
+    # export_for_georeferencing(contract_status)
 
-
+    # Download cluster selected raws
+    # download_cluster_selected_raws(contract_status)
 
 if __name__ == "__main__":
 
@@ -649,6 +705,7 @@ if __name__ == "__main__":
 
     country = "Nigeria"
     # contract_name = "NCAP_DOS_126_NG"
-    contract_name = "NCAP_DOS_CAS_FI"
+    # contract_name = "NCAP_DOS_CAS_FI"
+    contract_name = "NCAP_DOS_CAS"
     # contract_alias = "test"
     main(contract_name, country, "google_vm") # , contract_alias=contract_alias)
