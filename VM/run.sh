@@ -21,7 +21,7 @@ run_docker_script() {
     # Run the Docker container to execute the specified Python script with named arguments
     sudo docker run --name "${container_name}" \
         --mount type=bind,source=/home/jeffrey/repos/stitching-services,target=/home/app/stitching-services \
-        --mount type=bind,source=/mnt/jeffrey_stitching_bucket,target=/app/bucket \
+        --mount type=bind,source=/mnt/jeffrey_stitching_bucket_2,target=/app/bucket \
         stitching-services \
         python3 /home/app/stitching-services/${script_path} "$@"
 

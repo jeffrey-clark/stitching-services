@@ -298,15 +298,13 @@ def swath_breaks(contract_status):
         if machine == "savio":
             s = SavioClient()
 
-            # # export and upload the shell script
-            # shell_fp = generate_shell_script(contract_status, 2)
-            # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+            # upload the shell script
+            shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+            s.upload_files_sftp([shell_fp], [shell_fp_remote])
 
-            # s.upload_files_sftp([shell_fp], [shell_fp_remote])
-
-            # # send execution command
-            # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
-            # print(f"Command sent to {machine}: Featurize")
+            # send execution command
+            s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+            print(f"Command sent to {machine}: Featurize")
 
         elif machine == "google_vm":
             vm = VMClient()

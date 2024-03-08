@@ -102,7 +102,16 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
+def _savio_swath_breaks(contract_status):
+    shell_script_content = _savio_base(contract_status, "stage_3", "24:00:00") + f"""
+# Run each stage
+echo "starting swath-breaks"
+run_docker "swath-breaks"
 
+update_status "swath_breaks" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
 
 
 
@@ -373,7 +382,7 @@ run_collect_and_zip() {{
 
     # Run the Docker container
     sudo docker run --name "${{container_name}}" \
-        --mount type=bind,source=/mnt/jeffrey_stitching_bucket,target=/app/bucket \
+        --mount type=bind,source=/mnt/jeffrey_stitching_bucket_2,target=/app/bucket \
         --mount type=bind,source=/home/jeffrey/repos/aerial-history-stitching,target=/home/app/aerial-history-stitching \
         --mount type=bind,source=/home/jeffrey/logs,target=/home/app/logs \
         enoda/opencv_surf \
@@ -407,7 +416,8 @@ def generate_shell_script(contract_status, shell_template_id, **kwargs):
 
     if machine.lower() == "savio":
         func_map = {'initialize_and_crop': _savio_init_and_crop, 
-                    'featurize': _savio_featurize
+                    'featurize': _savio_featurize, 
+                    'swath_breaks': _savio_swath_breaks
                     }
         
     elif machine.lower() == "google_vm":
