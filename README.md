@@ -84,7 +84,90 @@ apptainer build stitching-services.sif docker-archive://stitching-services.tar
 
 
 
+# Things that need to be done when setting up new VM
 
+- Make sure that the VM has the following settings
+
+  ```
+  API and identity management
+  
+  	Cloud API access scopes: Allow full access to all Cloud APIs
+  ```
+
+  
+
+- Linux APT installs
+
+  ```shell
+  sudo apt update
+  sudo apt upgrade
+  sudo apt install git
+  sudo apt install htop
+  sudo apt install tmux
+```
+  
+With the Google VMs it is rather easy to install `GCSFuse`
+  
+  ```shell
+  export GCSFUSE_REPO=gcsfuse-`lsb_release -c -s`
+  
+  sudo mkdir -p /etc/apt/keyrings/
+  	wget -O- https://packages.cloud.google.com/apt/doc/apt-key.gpg |
+  	    gpg --dearmor |
+  	    sudo tee /etc/apt/keyrings/gcsfuse.gpg > /dev/null
+  	
+  	echo "deb [signed-by=/etc/apt/keyrings/gcsfuse.gpg] https://packages.cloud.google.com/apt $GCSFUSE_REPO main" |
+  	    sudo tee /etc/apt/sources.list.d/gcsfuse.list
+  
+  sudo apt-get update
+  sudo apt-get install gcsfuse
+```
+  
+You also need to install **Docker**
+
+- Clone the repos `stitching-services` and `aerial-history-stitching`
+
+- Build the Docker image from the Dockerfile
+
+  ```
+  sudo docker build -t stitching-services .
+  ```
+
+- Create the mount point `/mnt/<name of google bucket>` and set the chmod
+
+  ```
+  sudo mkdir /mnt/<name of google bucket>
+  sudo chmod 777 /mnt/<name of google bucket>
+  
+  sudo mkdir /mnt/jeffrey_stitching_bucket_2
+  sudo chmod 777 /mnt/jeffrey_stitching_bucket_2
+  ```
+
+  
+
+- Modify `/etc/fuse.conf`
+
+  ```
+  sudo nano /etc/fuse.conf
+  
+  --> Uncomment the option user_allow_other
+  ```
+
+- Modify `/etc/fstab`
+
+  - First run the command `id` and get the user_id and group_id, these need to be insterted correctly into the mount command below
+
+    ````
+    sudo nano /etc/fstab
+    
+    # Append the following mount entry
+    
+    jeffrey_stitching_bucket_2 /mnt/jeffrey_stitching_bucket_2 gcsfuse rw,gid=1005,uid=1004,file_mode=777,dir_mode=777,user,allow_other,_netdev,stat_cache_ttl=0,ttl=0,type_cache_ttl=0,implicit_dirs
+    ````
+
+
+
+- IN the 
 
 
 

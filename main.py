@@ -1,3 +1,22 @@
+# --- SET PROJECT ROOT 
+
+import os
+import sys
+
+# Find the project root directory dynamically
+root_dir = os.path.abspath(__file__)  # Start from the current file's directory
+
+# Traverse upwards until the .project_root file is found or until reaching the system root
+while not os.path.exists(os.path.join(root_dir, '.project_root')) and root_dir != '/':
+    root_dir = os.path.dirname(root_dir)
+
+# Make sure the .project_root file is found
+assert root_dir != '/', "The .project_root file was not found. Make sure it exists in your project root."
+
+sys.path.append(root_dir)
+
+# ---
+
 from Models.Contract import Country
 from Models.GoogleDrive import ConfigSheet, StatusSheet, Status
 from Functions.contract_utils import generate_default_config_data
@@ -8,8 +27,6 @@ from Models.Tabei import TabeiClient
 from Models.GoogleVM import VMClient
 from Models.GoogleBucket import GoogleBucket
 from Local.update_apptainer import update_docker
-import os
-import sys
 from tqdm import tqdm
 import time
 import re
@@ -138,11 +155,42 @@ def check_if_crop_finished(contract_status):
     if contract_status.data['crop_params'] != "Done":
         raise BrokenPipeError("You need to finish the manual cropping stage")
     
-def upload_config(contract_status, country):
+def upload_services_config(machine):
+
+    # export the contract for savio
+    rel_config_fp = "Config/config.yml"
+    rel_google_service_fp = "Config/google_service.json"
+    rel_fps = [rel_config_fp, rel_google_service_fp]
+    local_fps = [os.path.join(root_dir, x) for x in rel_fps]
+
+    if machine == "savio":
+        s = SavioClient()
+        remote_root = os.path.join(cfg["savio"]["repos"], "stitching-services")
+        # ensure that the config folder exists
+        s.makedirs(os.path.join(remote_root, "Config"))
+        # upload the important files
+        remote_fps = [os.path.join(remote_root, x) for x in rel_fps]
+        s.upload_files_sftp(local_fps, remote_fps)
+
+    elif machine == "google_vm":
+        vm = VMClient()
+
+        remote_root = cfg["google_vm"]["vm_paths"]["services_repo"]
+        # ensure that the config folder exists
+        vm.makedirs(os.path.join(remote_root, "Config"))
+        # upload the important files
+        remote_fps = [os.path.join(remote_root, x) for x in rel_fps]
+        vm.upload_files_sftp(local_fps, remote_fps)
+
+
+    print(f"Uploaded the Stitching Services Config and Google Service Account Credentials")
+
+
+
+def upload_contract_config(contract_status, country):
 
     machine = contract_status.machine
     
-
     # export the contract for savio
     config_fp = config_db.export_config(contract_status.contract_alias, country, machine)
     
@@ -627,13 +675,16 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
     contract_status = get_contract_status_object(contract_alias, machine)  # This is the Google Sheet Status Row
     upload_conifg_sheet_entry(contract_alias, contract, machine)  # Add a default config row in Google Sheet Config
 
+    # upload the services config
+    # upload_services_config(machine)
 
     # if you need to re-upload the config, uncomment this line
-    # upload_config(contract_status, country)
+    # upload_contract_config(contract_status, country)
 
     # If Savio, make sure we have sinularity container
     if machine == "savio":
         update_docker()
+        
 
     # Step 1: Upload Images from Tabei to Machine
     upload_images(country, contract_alias, contract, contract_status)
