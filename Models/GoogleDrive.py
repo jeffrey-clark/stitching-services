@@ -150,10 +150,13 @@ class GoogleDriveService:
         existing_file_id = self.file_exists(file_name, folder_id)
         service = self.build()
 
+        chunksize = 1000 * 1024 * 1024  # 1 Gigabyte
+        
         if existing_file_id:
             if overwrite:
                 # Overwrite the existing file
-                media = MediaFileUpload(file_path, mimetype=mime_type, chunksize=262144, resumable=True)
+
+                media = MediaFileUpload(file_path, mimetype=mime_type, chunksize=chunksize, resumable=True)
                 request = service.files().update(fileId=existing_file_id, media_body=media)
                 response = None
                 while response is None:
@@ -168,7 +171,7 @@ class GoogleDriveService:
         else:
             # File does not exist, proceed with upload
             file_metadata = {'name': file_name, 'parents': [folder_id]}
-            media = MediaFileUpload(file_path, mimetype=mime_type, chunksize=262144, resumable=True)
+            media = MediaFileUpload(file_path, mimetype=mime_type, chunksize=chunksize, resumable=True)
             request = service.files().create(body=file_metadata, media_body=media, fields='id')
             response = None
             while response is None:
