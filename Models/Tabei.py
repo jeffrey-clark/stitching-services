@@ -168,6 +168,23 @@ class TabeiClient:
     @ensure_connection('ftp')
     def listdir(self, path):
         return [x for x in self.sftp.listdir(path) if not x.startswith('.')]
+    
+    @ensure_connection('ftp')
+    def makedirs(self, path):
+        """Ensure that a directory exists on the remote server."""
+        # Split the path and filter out empty parts to handle absolute paths
+        dir_parts = [part for part in path.split('/') if part]
+        current_dir = '/'
+
+        for part in dir_parts:
+            current_dir = os.path.join(current_dir, part)
+            try:
+                self.sftp.stat(current_dir)
+            except IOError:
+                print(f"Creating remote directory: {current_dir}")
+                self.sftp.mkdir(current_dir)
+
+                
 
     @ensure_connection('ftp')
     def upload_files_sftp(self, file_paths, remote_paths):
@@ -303,10 +320,11 @@ class TabeiClient:
     
         
     @ensure_connection('shell')
-    def send_tmux_command(self, session_name, command):
+    def send_tmux_command(self, session_name, command, directory=None):
+
         # Using bash -c to execute the tmux command
         full_command = f"bash -c \"tmux new-session -d -s {session_name} '{command}'\""
-        output = self.execute_command(full_command)
+        output = self.execute_command(full_command, directory=directory)
         if output:
             print(f"Output from tmux command: {output}")
         else:

@@ -135,8 +135,15 @@ class GoogleBucket:
         for gs_path in bucket_paths:
             if gs_path.startswith('gs://'):
 
-                # Create local directories if they don't exist
-                os.makedirs(local_dest, exist_ok=True)
+                # Check if the gs_path exists
+                try:
+                    result = subprocess.run(["gsutil", "ls", gs_path], check=True, capture_output=True, text=True)
+                    if not result.stdout.strip():
+                        print(f"No objects found at {gs_path}. Skipping download.")
+                        continue
+                except subprocess.CalledProcessError:
+                    print(f"Failed to list contents of {gs_path}. Skipping download.")
+                    continue
 
                 print(f"Downloading directory {gs_path} to {local_dest}...")
 

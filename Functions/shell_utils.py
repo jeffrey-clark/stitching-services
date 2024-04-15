@@ -139,8 +139,14 @@ run_docker() {{
     if sudo docker ps -a --format '{{{{.Names}}}}' | grep -q "^${{container_name}}$"; then
         # Check if the container is running
         if sudo docker ps --format '{{{{.Names}}}}' | grep -q "^${{container_name}}$"; then
-            echo "Error: Container ${{container_name}} is still running."
-            exit 1
+            # echo "Error: Container ${{container_name}} is still running."
+            # exit 1
+
+            # Stop the running container
+            sudo docker stop "${{container_name}}"
+            # Remove the stopped container
+            sudo docker rm "${{container_name}}"
+        
         else
             # Remove the stopped container
             sudo docker rm "${{container_name}}"
@@ -287,13 +293,18 @@ def _google_vm_create_raster_swaths(contract_status):
     vm_run_shell = os.path.join(cfg['google_vm']['vm_paths']['services_repo'], "VM/run.sh")
     contract_alias = contract_status.contract_alias
 
+    source_folder = os.path.join(cfg['google_vm']['docker_paths']['results_folder'], contract_alias)
+    destination_folder = os.path.join(source_folder, "swaths")
+    destination_folder_geojons = os.path.join(source_folder, "swaths/geojson")
+
     shell_script_content = _google_vm_base(contract_status) + f"""
 # Create the swath rasters
 echo "starting create-raster"
 run_docker "create-raster" --raster-type "swaths" 
 
-# organize the swats in folder
-bash {vm_run_shell} VM/move_files.py move_files --contract_alias {contract_alias} --machine google_vm --type swaths
+# organize the swaths in folder
+bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder} --pattern "cluster.*\.tif$"
+bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder_geojons} --pattern "cluster.*\.geojson$"
 
 # Set update to Done
 update_status "rasterize_swaths" "Done"
@@ -302,19 +313,38 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
-def _google_vm_create_raster_clusters(contract_status):
+def _google_vm_create_raster_clusters(contract_status, ids=None, annotate=False):
 
     vm_run_shell = os.path.join(cfg['google_vm']['vm_paths']['services_repo'], "VM/run.sh")
+    contract_alias = contract_status.contract_alias
+
+    source_folder = os.path.join(cfg['google_vm']['docker_paths']['results_folder'], contract_alias)
+    destination_folder = os.path.join(source_folder, "clusters")
+    destination_folder_geojons = os.path.join(source_folder, "clusters/geojson")
+
+    annotate_option = ""
+    if annotate:
+        annotate_option = '--annotate "graph"'
+        destination_folder = os.path.join(source_folder, "clusters_annotated")
+        destination_folder_geojons = os.path.join(source_folder, "clusters_annotated/geojson")
+
+    id_restriction = ""
+    if ids is not None:
+        if isinstance(ids, list):
+            ids = [str(x) for x in ids]
+            id_restriction = f"--ids {' '.join(ids)}"
 
     shell_script_content = _google_vm_base(contract_status) + f"""
 # Create the cluster rasters
 echo "starting create-raster"
-run_docker "create-raster" --raster-type "clusters" --annotate "graph"
+run_docker "create-raster" --raster-type "clusters" {annotate_option} {id_restriction}
 
-# organize the swats in folder
+# organize the clusters in folder
+bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder} --pattern "cluster.*\.tif$"
+bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder_geojons} --pattern "cluster.*\.geojson$"
 
 # Set update to Done
-update_status "create_raster_1" "Done"
+update_status "rasterize_clusters" "Done"
 echo "All stages completed successfully."
     """
     return shell_script_content
@@ -409,6 +439,38 @@ echo "All stages completed successfully."
 
 
 
+
+
+def _google_vm_prepare_swaths(contract_status):
+
+    vm_run_shell = os.path.join(cfg['google_vm']['vm_paths']['services_repo'], "VM/run.sh")
+    contract_alias = contract_status.contract_alias
+
+    source_folder = os.path.join(cfg['google_vm']['docker_paths']['results_folder'], contract_alias)
+    destination_folder = os.path.join(source_folder, "swaths_w_raws")
+    destination_folder_geojons = os.path.join(source_folder, "swaths_w_raws/geojson")
+
+    shell_script_content = _google_vm_base(contract_status) + f"""
+# Run each stage
+echo "starting feautrization"
+# run_docker "create-raster-w-raws" --raster-type swaths
+
+# organize the clusters in folder
+bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder} --pattern "swath.+_w_raws\.tif$"
+bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder_geojons} --pattern "swath.+_w_raws\.tif.geojson$"
+
+update_status "prepare_swaths" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
+
+
+
+
+
+
+
+
 def generate_shell_script(contract_status, shell_template_id, **kwargs):
 
     contract_alias = contract_status.contract_alias
@@ -429,7 +491,8 @@ def generate_shell_script(contract_status, shell_template_id, **kwargs):
                     'initialize_graph': _google_vm_refine_and_init_graph,
                     'create_raster_clusters': _google_vm_create_raster_clusters,
                     'new_neighbors': _google_vm_new_neighbors,
-                    'export_georef': _google_vm_export_georef
+                    'export_georef': _google_vm_export_georef,
+                    'prepare_swaths': _google_vm_prepare_swaths
                     }
     else:
         raise ValueError('Specified machine is not supported')

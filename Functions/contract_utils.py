@@ -246,6 +246,18 @@ def export_config_file(contract_name, country, config_data, machine_name):
             "raster_output_folder": os.path.join(dp['results_folder'], contract_name),
             "swath_folder": os.path.join(dp['cache_folder'], contract_name)
         }
+
+    elif machine_name.lower() == "tabei":
+        image_folders = config_data['folders']
+        
+        # Machine-specific paths
+        machine_specific_data = {
+            "img_cache_folder": os.path.join(paths['cache_folder'], contract_name, "SURF"),
+            "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_name),
+            "raster_output_folder": os.path.join(paths['results_folder'], contract_name),
+            "swath_folder": os.path.join(paths['cache_folder'], contract_name),
+        }
+
     
     else:  # For 'tabei' and other machines
         #image_folders = config_data['folders']  # Already in the correct format
@@ -258,14 +270,12 @@ def export_config_file(contract_name, country, config_data, machine_name):
     # Combine common and machine-specific configuration data
     config_data.update(machine_specific_data)
 
-    # Specify the file path for the YAML file
-    output_file_path = os.path.join("Files/config_files", f"{contract_name}.yml")
-
      # Serialize config_data using the custom format function
     custom_yaml_content = config_format(config_data)
 
     # Write the custom YAML content to file
-    output_file_path = os.path.join("Files/config_files", f"{contract_name}.yml")
+    os.makedirs(os.path.join("Files/config_files", machine_name.lower()), exist_ok=True)
+    output_file_path = os.path.join("Files/config_files", machine_name.lower(),  f"{contract_name}.yml")
     with open(output_file_path, 'w') as file:
         file.write(custom_yaml_content)
 

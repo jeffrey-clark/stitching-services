@@ -34,7 +34,7 @@ do = cfg['google_drive']['data_overview']
 
 
 def download_data_overview():
-    g = GoogleDriveService()
+    g = GoogleDriveService('service_account')
     g.download_file(do['id'], do['path'])
 
 def exists_data_overview():

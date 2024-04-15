@@ -425,17 +425,17 @@ class ConfigSheet(GoogleSheet):
         return config_data
     
 
-    def export_config(self, contract_name, country, machine_name):
+    def export_config(self, contract_name, country, machine_name, export_machine_name=None):
         config_data = self.get_config(contract_name, machine_name)
-        return export_config_file(contract_name, country, config_data, machine_name)
-
-
+        if export_machine_name is None:
+            export_machine_name = machine_name
+        return export_config_file(contract_name, country, config_data, export_machine_name)
 
 
 status_columns = ['contract_name', 'machine', 'user', 'image_upload', 'regex_test', 'thumbnails', 'crop_params',
-                  'init_and_crop', 'download_cropping_sample', 'featurize',	'swath_breaks',	'rasterize_swaths', 
-                  'download_swaths', 'stitch_across', 'initialize_graph', 'create_raster_1', 'download_clusters_1', 
-                  'new_neighbors', 'export_georef']
+                  'init_and_crop', 'download_cropping_sample', 'featurize', 'swath_breaks', 'rasterize_swaths', 
+                  'download_swaths', 'stitch_across', 'initialize_graph', 'rasterize_clusters', 'download_clusters_1', 
+                  'new_neighbors', 'export_georef', 'prepare_swaths', 'export_georef_swaths']
 
 class StatusSheet(GoogleSheet):
     def __init__(self, spreadsheet_id, sheet_name):
