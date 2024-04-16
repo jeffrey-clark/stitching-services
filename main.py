@@ -19,7 +19,7 @@ sys.path.append(root_dir)
 
 from Models.Contract import Country
 from Models.GoogleDrive import ConfigSheet, StatusSheet, Status
-from Functions.contract_utils import generate_default_config_data
+from Functions.contract_utils import generate_default_config_data, export_config_file
 import Functions.utilities as u
 from Functions.shell_utils import generate_shell_script
 from Models.Savio import SavioClient, pwd
@@ -384,6 +384,14 @@ def rasterize_swaths(contract_status):
         if machine == "savio":
             s = SavioClient()
 
+            # upload the shell script
+            shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+            s.upload_files_sftp([shell_fp], [shell_fp_remote])
+
+            # send execution command
+            s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+            print(f"Command sent to {machine}: rasterize_swaths")
+
         elif machine == "google_vm":
             vm = VMClient()
 
@@ -409,8 +417,12 @@ def download_swaths(contract_status):
     if status['download_swaths'] != "Done":
 
         if machine == "savio":
-                s = SavioClient()
-                raise ValueError("NO CODE FOR SAVIO COMPLETE")
+            s = SavioClient()
+                
+            swaths_folder = os.path.join(cfg['savio']['results_folder'], contract_alias, 'swaths')
+            local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
+
+            s.download_folders_sftp([swaths_folder], local_results_folder)
         
         elif machine == "google_vm":
             b = GoogleBucket()
@@ -423,6 +435,28 @@ def download_swaths(contract_status):
 
         contract_status.update_status("download_swaths", f"Done")
 
+
+
+def download_img_df(contract_status):
+
+    status = contract_status.data
+    machine = status['machine']
+    contract_alias = status['contract']
+
+
+    if machine == "savio":
+            s = SavioClient()
+            raise ValueError("NO CODE FOR SAVIO COMPLETE")
+    
+    elif machine == "google_vm":
+        b = GoogleBucket()
+
+        bucket_cache_folder = os.path.join(cfg['bucket']['root'], "cache", contract_alias)
+        local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
+
+        fps = [os.path.join(bucket_cache_folder, "img_df.geojson")]
+        for fp in fps:
+            b.download_files_from_bucket([fp], local_results_folder)
 
 
 
@@ -444,15 +478,16 @@ def stitch_across(contract_status):
         if machine == "savio":
             s = SavioClient()
 
-            # # export and upload the shell script
-            # shell_fp = generate_shell_script(contract_status, 2)
-            # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+            # export and upload the shell script
+            shell_fp = generate_shell_script(contract_status, 'stitch_across')
+            shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
 
-            # s.upload_files_sftp([shell_fp], [shell_fp_remote])
+            # upload the shell script
+            s.upload_files_sftp([shell_fp], [shell_fp_remote])
 
-            # # send execution command
-            # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
-            # print(f"Command sent to {machine}: Featurize")
+            # send execution command
+            s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+            print(f"Command sent to {machine}: stitch-across")
 
         elif machine == "google_vm":
             vm = VMClient()
@@ -471,14 +506,15 @@ def stitch_across(contract_status):
 
 
 
-def run_pipeline(contract_status, stage, required_stage):
+def run_pipeline(contract_status, stage, required_stage=None):
 
     status = contract_status.data
     machine = status['machine']
     contract_alias = status['contract']
 
-    if status[required_stage] != "Done":
-        raise RuntimeError(f"You need to finish the {required_stage} stage")
+    if required_stage is not None:
+        if status[required_stage] != "Done":
+            raise RuntimeError(f"You need to finish the {required_stage} stage")
     if status[stage] != "Done":
         
         if machine == "savio":
@@ -511,7 +547,7 @@ def run_pipeline(contract_status, stage, required_stage):
 
 
 
-def rasterize_clusters(contract_status):
+def rasterize_clusters(contract_status, ids=None, annotate=False):
     
     status = contract_status.data
     machine = status['machine']
@@ -519,10 +555,10 @@ def rasterize_clusters(contract_status):
 
     if status['initialize_graph'] != "Done":
         raise RuntimeError("You need to finish the initialize_graph stage")
-    if status['create_raster_1'] != "Done":
+    if status['rasterize_clusters'] != "Done":
         
         # export the shell script
-        shell_fp = generate_shell_script(contract_status, 'create_raster_clusters')
+        shell_fp = generate_shell_script(contract_status, 'create_raster_clusters', ids=ids, annotate=annotate)
 
         if machine == "savio":
             s = SavioClient()
@@ -535,8 +571,8 @@ def rasterize_clusters(contract_status):
 
             vm.upload_files_sftp([shell_fp], [shell_fp_remote])
             # execute the command in a tmux session
-            vm.send_tmux_command(f"{contract_alias}_rasterize_swaths", f"bash {shell_fp_remote}")
-            print(f"Command sent to {machine}: rasterize_swaths")
+            vm.send_tmux_command(f"{contract_alias}_rasterize_clusters", f"bash {shell_fp_remote}")
+            print(f"Command sent to {machine}: rasterize_clusters")
 
         contract_status.update_status('rasterize_clusters', f"Submitted")
 
@@ -552,21 +588,15 @@ def download_clusters(contract_status, stage, required_stage):
     if status[stage] != "Done":
 
         if machine == "savio":
-                s = SavioClient()
+            s = SavioClient()
 
         elif machine == "google_vm":
             b = GoogleBucket()
 
-            bucket_results_folder = os.path.join(cfg['bucket']['root'], "results", contract_alias)
-
-            bucket_files_fps = [x for x in b.listdir_bucket(bucket_results_folder) if not x.endswith("/")]
+            cluster_folders = ["clusters", "clusters_annotated"]
+            remote_folders = [os.path.join(cfg['bucket']['root'], "results", contract_alias, x) for x in cluster_folders]
             local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
-            os.makedirs(os.path.dirname(local_results_folder), exist_ok=True)
-
-
-            print(bucket_files_fps)
-            print(local_results_folder)
-            b.download_files_from_bucket(bucket_files_fps, local_results_folder)
+            b.download_folders_from_bucket(remote_folders, local_results_folder)
 
         contract_status.update_status(stage, f"Done")
 
@@ -640,6 +670,7 @@ def export_for_georeferencing(contract_status):
 
         # contract_status.update_status(stage, f"Submitted")
 
+
 def download_cluster_selected_raws(contract_status):
 
     status = contract_status.data
@@ -674,6 +705,10 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
     contract = get_contract(country, contract_name, refresh_data_overview) # This is a contract object from the Data Overview
     contract_status = get_contract_status_object(contract_alias, machine)  # This is the Google Sheet Status Row
     upload_conifg_sheet_entry(contract_alias, contract, machine)  # Add a default config row in Google Sheet Config
+
+    # quick fix clean country string
+    country = re.sub(r"\(NCAP\)", "", country).strip()
+
 
     # upload the services config
     # upload_services_config(machine)
@@ -719,24 +754,121 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
 
     # Step 10: Initialize Graph, Refine Links, Opt Links, Global Opts
     run_pipeline(contract_status, "initialize_graph", "stitch_across")
+    # download_img_df(contract_status)
 
     # Step 11: Create Raster
     # run_pipeline(contract_status, "create_raster_1", "initialize_graph")
-    rasterize_clusters(contract_status)
+    rasterize_clusters(contract_status, ids=[0, 1, 2, 3], annotate=True)
 
-
-    # # Step 12: Download Rasters
-    # # download_clusters(contract_status, "download_clusters_1", "create_raster_1")
+    # Step 12: Download Rasters
+    download_clusters(contract_status, "download_clusters_1", "rasterize_clusters")
 
     # # Step 13: New Neighbors
     # #new_neighbors(contract_status, "new_neighbors", "create_raster_1")
 
 
     # Export for georeferencing
-    # export_for_georeferencing(contract_status)
+    #export_for_georeferencing(contract_status)
 
     # Download cluster selected raws
     # download_cluster_selected_raws(contract_status)
+
+
+
+
+
+def prepare_swaths_georeferencing(contract_name, country, machine, contract_alias=None, refresh_data_overview=False):
+    
+    machine = machine.lower()
+
+    if contract_alias is None:
+        contract_alias = contract_name
+
+    contract = get_contract(country, contract_name, refresh_data_overview) # This is a contract object from the Data Overview
+    contract_status = get_contract_status_object(contract_alias, machine)  # This is the Google Sheet Status Row
+    upload_conifg_sheet_entry(contract_alias, contract, machine)  # Add a default config row in Google Sheet Config
+
+    # quick fix clean country string
+    country = re.sub(r"\(NCAP\)", "", country).strip()
+
+    # --- code starts here ----
+
+    run_pipeline(contract_status, "prepare_swaths")
+
+
+def export_georeferencing(contract_name, country, machine, contract_alias=None, refresh_data_overview=False):
+
+    machine = machine.lower()
+
+    if contract_alias is None:
+        contract_alias = contract_name
+
+    contract = get_contract(country, contract_name, refresh_data_overview)
+
+    # download the csv file
+    b = GoogleBucket()
+    remote_csv_fp = os.path.join(cfg['bucket']['root'], "results", contract_name, "swaths_selected_raws.csv")
+    local_folder = os.path.join(cfg['local']['results'], country, contract_name)
+    b.download_files_from_bucket([remote_csv_fp],local_folder)
+
+    # download the swath_rasters
+    local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
+    b.download_folders_from_bucket([os.path.join(cfg['bucket']['root'], "results", contract_name, "swaths_w_raws")], local_results_folder)
+
+    # upload the config file to Tabei (make sure that the paths are correctly specified)
+    local_config_fp = config_db.export_config(contract_alias, country, machine, "tabei")
+    remote_config_fp = os.path.join(cfg["tabei"]['stitching_repo'], "config", country, os.path.basename(local_config_fp))
+    t = TabeiClient()
+    # t.upload_files_sftp([local_config_fp], [remote_config_fp])
+
+    # upload the swaths_selected_raws.csv from local to Tabei results folder
+    local_csv_fp = os.path.join(local_folder, "swaths_selected_raws.csv")
+    tabei_results_folder = os.path.join(cfg["tabei"]['results_folder'], contract_name)
+    # t.makedirs(tabei_results_folder)
+    tabei_csv_fp = os.path.join(tabei_results_folder, "swaths_selected_raws.csv")
+    # t.upload_files_sftp([local_csv_fp], [tabei_csv_fp])
+
+    # Run the generate archive command
+    relative_config = os.path.relpath(remote_config_fp, cfg["tabei"]['stitching_repo'])
+
+    # figure out the base to replace filepaths
+    folders = contract.df.path.to_list()
+
+    options = [
+        "/mnt/shackleton_shares/lab/aerial_history_project/Images"
+        
+        ]
+    replace_to = None
+    for o in options:
+        if folders[0].startswith(o):
+            replace_to = o
+
+    if replace_to is None:
+        raise ValueError('FIX THE SUBSITUTION')
+    
+
+    env = "/home/jeffrey.clark/miniconda3/envs/surf/bin/python3.6"
+    command = f"scripts/collect_and_zip_raws.py --config {relative_config} --replace-from {cfg['google_vm']['docker_paths']['images_folder']} --replace-to {replace_to} --group-type swaths"
+
+    full_command = f"{env} {command}"
+    # t.send_tmux_command(f"{contract_alias}_collect_and_zip", full_command, cfg["tabei"]['stitching_repo'])
+    print(f"Command sent to Tabei: collect_and_zip_raws")
+
+    
+    # contract_status.update_status('stitch_across', f"Submitted")
+
+
+
+def upload_archive(contract_alias, country):
+    t = TabeiClient()
+    env = "/home/jeffrey.clark/miniconda3/envs/stitch-service/bin/python3.11"
+    command = f"Tabei/upload_archive.py --contract {contract_alias} --country {country}"
+
+    full_command = f"{env} {command}"
+    t.send_tmux_command(f"{contract_alias}_upload_archive", full_command, cfg["tabei"]['stitching-services'])
+    print(f"Command sent to Tabei: upload archive")
+
+
 
 if __name__ == "__main__":
 
@@ -755,6 +887,12 @@ if __name__ == "__main__":
     country = "Nigeria"
     # contract_name = "NCAP_DOS_126_NG"
     # contract_name = "NCAP_DOS_CAS_FI"
-    contract_name = "NCAP_DOS_CAS"
+    # contract_name = "NCAP_DOS_CAS"
+    contract_name = "NCAP_DOS_212_NG"
     # contract_alias = "test"
-    main(contract_name, country, "google_vm") # , contract_alias=contract_alias)
+    main(contract_name, country, "savio") # , contract_alias=contract_alias)
+
+    # prepare_swaths_georeferencing(contract_name, country, "google_vm") 
+
+    # export_georeferencing(contract_name, country, "google_vm")
+    # upload_archive(contract_name, country)

@@ -32,7 +32,7 @@ def _savio_base(contract_status, slurm_suffix, time_limit):
 #SBATCH --time={time_limit}
 #
 #
-run_docker() {{
+run_singularity() {{
     local stage="$1"
     shift  # Shift the first argument so that "$@" can be used for additional arguments
     
@@ -69,20 +69,46 @@ update_status() {{
         exit $exit_code
     fi
 }}
+
+# Function to run a stitching services script
+run_stitching_services() {{
+    local script_path="$1"
+    shift
+    singularity run {stitching_services_sif} \\
+        python3 {os.path.join(services_repo, "$script_path")} \\
+        "$@"
+
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "Error: Singularity container for '$script_path' failed with exit code $exit_code."
+        exit $exit_code
+    fi
+}}
+
+
 # Placeholder for any additional common setup or functions
 """
     return shell_script_base
 
 
 def _savio_init_and_crop(contract_status):
+    
+    contract_alias = contract_status.contract_alias
+
+    source_folder = os.path.join(cfg['savio']['results_folder'], contract_alias)
+    destination_folder = os.path.join(source_folder, "cropping_samples")
+
     shell_script_content = _savio_base(contract_status, "stage_1", "02:00:00") + f"""
 # Run each stage
 echo "starting initialize"
-run_docker "initialize"
+run_singularity "initialize"
 echo "starting crop"
-run_docker "crop"
+run_singularity "crop"
 echo "starting inspect-cropping"
-run_docker "inspect-cropping"
+run_singularity "inspect-cropping"
+
+# organize the cropping samples in folder
+run_stitching_services VM/move_files.py --source {source_folder} --destination {destination_folder} --pattern "cropping_sample.*\.jpg$"
 
 update_status "init_and_crop" "Done"
 echo "All stages completed successfully."
@@ -94,7 +120,7 @@ def _savio_featurize(contract_status):
     shell_script_content = _savio_base(contract_status, "stage_2", "24:00:00") + f"""
 # Run each stage
 echo "starting feautrization"
-run_docker "featurize"
+run_singularity "featurize" --only-missing
 
 update_status "featurize" "Done"
 echo "All stages completed successfully."
@@ -106,13 +132,49 @@ def _savio_swath_breaks(contract_status):
     shell_script_content = _savio_base(contract_status, "stage_3", "24:00:00") + f"""
 # Run each stage
 echo "starting swath-breaks"
-run_docker "swath-breaks"
+run_singularity "swath-breaks"
 
 update_status "swath_breaks" "Done"
 echo "All stages completed successfully."
     """
     return shell_script_content
 
+
+def _savio_create_raster_swaths(contract_status):
+
+    contract_alias = contract_status.contract_alias
+
+    source_folder = os.path.join(cfg['savio']['results_folder'], contract_alias)
+    destination_folder = os.path.join(source_folder, "swaths")
+    destination_folder_geojons = os.path.join(source_folder, "swaths/geojson")
+
+    shell_script_content = _savio_base(contract_status, "rasterize_swaths", "03:00:00") + f"""
+# Create the swath rasters
+echo "starting create-raster"
+run_singularity "create-raster" --raster-type "swaths" 
+
+# organize the swaths in folder
+run_stitching_services VM/move_files.py --source {source_folder} --destination {destination_folder} --pattern "swath.*\.tif$"
+run_stitching_services VM/move_files.py --source {source_folder} --destination {destination_folder_geojons} --pattern "swath.*\.geojson$"
+
+# Set update to Done
+update_status "rasterize_swaths" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
+
+
+
+def _savio_stitch_across(contract_status):
+    shell_script_content = _savio_base(contract_status, "stage_3", "24:00:00") + f"""
+## Run each stage
+echo "starting stitch-across"
+run_singularity "stitch-across"
+
+update_status "stitch_across" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
 
 
 
@@ -303,8 +365,8 @@ echo "starting create-raster"
 run_docker "create-raster" --raster-type "swaths" 
 
 # organize the swaths in folder
-bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder} --pattern "cluster.*\.tif$"
-bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder_geojons} --pattern "cluster.*\.geojson$"
+bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder} --pattern "swath.*\.tif$"
+bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder_geojons} --pattern "swath.*\.geojson$"
 
 # Set update to Done
 update_status "rasterize_swaths" "Done"
@@ -479,7 +541,9 @@ def generate_shell_script(contract_status, shell_template_id, **kwargs):
     if machine.lower() == "savio":
         func_map = {'initialize_and_crop': _savio_init_and_crop, 
                     'featurize': _savio_featurize, 
-                    'swath_breaks': _savio_swath_breaks
+                    'swath_breaks': _savio_swath_breaks,
+                    'create_raster_swaths': _savio_create_raster_swaths,
+                    'stitch_across': _savio_stitch_across,
                     }
         
     elif machine.lower() == "google_vm":

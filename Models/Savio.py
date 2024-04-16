@@ -24,6 +24,7 @@ from tqdm import tqdm
 from paramiko import SSHClient
 import time
 import glob
+from stat import S_ISDIR, S_ISREG
 
 import Functions.utilities as u
 
@@ -217,7 +218,55 @@ class SavioClient:
         except Exception as e:
             print(f"An error occurred during file download: {e}")
             raise e
-        
+    
+    @ensure_connection('ftp')
+    def download_folders_sftp(self, remote_dir_paths, local_dir_path):
+        """
+        Recursively downloads multiple directories from the Savio server to a local destination.
+
+        Args:
+            remote_dir_paths (list): A list of remote directory paths on the Savio server.
+            local_dir_path (str): The local base directory path where the folders will be downloaded.
+        """
+        # Ensure the local base directory exists
+        os.makedirs(local_dir_path, exist_ok=True)
+
+        for remote_dir_path in remote_dir_paths:
+            local_sub_dir_path = os.path.join(local_dir_path, os.path.basename(remote_dir_path))
+            self.download_folder_sftp(remote_dir_path, local_sub_dir_path)
+
+    @ensure_connection('ftp')
+    def download_folder_sftp(self, remote_dir_path, local_dir_path):
+        """
+        Recursively downloads a directory from the Savio server to a local destination.
+
+        Args:
+            remote_dir_path (str): The remote directory path on the Savio server.
+            local_dir_path (str): The local directory path where the folder will be downloaded.
+        """
+        # Ensure the local directory for this specific folder exists
+        os.makedirs(local_dir_path, exist_ok=True)
+
+        # List all items in the remote directory
+        items = self.sftp.listdir_attr(remote_dir_path)
+
+        remote_paths = []
+        local_paths = []
+
+        for item in items:
+            remote_item_path = os.path.join(remote_dir_path, item.filename)
+            local_item_path = os.path.join(local_dir_path, item.filename)
+
+            if S_ISDIR(item.st_mode):  # If the item is a directory, recursively call the same function
+                self.download_folder_sftp(remote_item_path, local_item_path)
+            else:
+                remote_paths.append(remote_item_path)
+                local_paths.append(local_item_path)
+
+        if remote_paths:  # Download all files at this directory level
+            self.download_files_sftp(remote_paths, local_paths)
+
+
     @ensure_connection('ftp')
     def delete_files_sftp(self, file_paths):
         """
