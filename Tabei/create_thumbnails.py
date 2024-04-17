@@ -35,11 +35,11 @@ import pandas as pd
 cfg = read_config()
 
 
-def make_thumbnails(country, contract_name):
+def make_thumbnails(country, contract_code):
 
     c = Country(country, refresh=True)
-    print("contract name is:", contract_name)
-    contract = c.get_contract(contract_name)
+    print("contract code is:", contract_code)
+    contract = c.get_contract(contract_code)
     tabei_folders = contract.df.path
     # compute all of the fps
     fps = []
@@ -59,6 +59,7 @@ def make_thumbnails(country, contract_name):
         sample_fps = fps
     
     # make sure that the output dir exists
+    contract_name = f"{country}_{contract_code}"
     output_dir = translate_filepaths(os.path.join(cfg['tabei']['thumbnails_folder'], country, contract_name))
     for d in [os.path.dirname(output_dir), output_dir]:
         if not os.path.exists(d):
