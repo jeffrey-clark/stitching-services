@@ -110,7 +110,7 @@ if __name__ == "__main__":
     parser.add_argument('--contract_code', type=str, help='Contract code', required=True)
     parser.add_argument('--contract_alias', type=str, help='Contract alias', required=False)
     args = parser.parse_args()
-    make_thumbnails(args.country, args.contract_name, args.contract_alias)
+    make_thumbnails(args.country, args.contract_code, args.contract_alias)
 
     # # If debugging use this instead
     # nigeria = Country("Nigeria", refresh=False)
