@@ -35,10 +35,13 @@ import pandas as pd
 cfg = read_config()
 
 
-def make_thumbnails(country, contract_code):
+def make_thumbnails(country, contract_code, contract_alias=None):
+
+    if contract_alias is None:
+        contract_alias = f"{country}_{contract_code}"
 
     c = Country(country, refresh=True)
-    print("contract code is:", contract_code)
+
     contract = c.get_contract(contract_code)
     tabei_folders = contract.df.path
     # compute all of the fps
@@ -59,8 +62,7 @@ def make_thumbnails(country, contract_code):
         sample_fps = fps
     
     # make sure that the output dir exists
-    contract_name = f"{country}_{contract_code}"
-    output_dir = translate_filepaths(os.path.join(cfg['tabei']['thumbnails_folder'], country, contract_name))
+    output_dir = translate_filepaths(os.path.join(cfg['tabei']['thumbnails_folder'], country, contract_alias))
     for d in [os.path.dirname(output_dir), output_dir]:
         if not os.path.exists(d):
             os.mkdir(d)
@@ -105,9 +107,10 @@ def make_thumbnails(country, contract_code):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create thumbnails from a contract")
     parser.add_argument('--country', type=str, help='Country name', required=True)
-    parser.add_argument('--contract_name', type=str, help='Contract name', required=True)
+    parser.add_argument('--contract_code', type=str, help='Contract code', required=True)
+    parser.add_argument('--contract_alias', type=str, help='Contract alias', required=False)
     args = parser.parse_args()
-    make_thumbnails(args.country, args.contract_name)
+    make_thumbnails(args.country, args.contract_name, args.contract_alias)
 
     # # If debugging use this instead
     # nigeria = Country("Nigeria", refresh=False)
