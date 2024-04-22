@@ -432,7 +432,7 @@ class ConfigSheet(GoogleSheet):
         return export_config_file(contract_name, country, config_data, export_machine_name)
 
 
-status_columns = ['contract_name', 'machine', 'user', 'image_upload', 'regex_test', 'thumbnails', 'crop_params',
+status_columns = ['contract_name', 'code', 'machine', 'user', 'image_upload', 'regex_test', 'thumbnails', 'crop_params',
                   'init_and_crop', 'download_cropping_sample', 'featurize', 'swath_breaks', 'rasterize_swaths', 
                   'download_swaths', 'prepare_swaths', 'export_georef_swaths', 'upload_archive_swaths', 'stitch_across', 
                   'initialize_graph', 'rasterize_clusters', 'download_clusters_1', 'new_neighbors', 'export_georef']
@@ -446,25 +446,33 @@ class StatusSheet(GoogleSheet):
             print(f"Initialization failed: Worksheet '{sheet_name}' not found.")
             return
 
+        self.columns = {}  # This will store column names and their indexes
         self.initialize_columns()
 
     def initialize_columns(self):
-        # Check if the first row is empty (assuming if first cell is empty, the row is empty)
-        if not self.worksheet.cell(1, 1).value:
+        # Populate column headers into a dictionary for easy access
+        headers = self.worksheet.row_values(1)
+        if not headers[0]:  # Assume if the first cell is empty, the row is empty
             # Populate the first row with status_columns
-            cell_list = self.worksheet.range(1, 1, 1, len(status_columns))
+            headers = status_columns  # Assuming status_columns is defined
+            cell_list = self.worksheet.range(1, 1, 1, len(headers))
             for i, cell in enumerate(cell_list):
-                cell.value = status_columns[i]
+                cell.value = headers[i]
             self.worksheet.update_cells(cell_list)
             print("Column initialization complete.")
         else:
-            print("Sheet already has data. Column initialization skipped.")
+            # Map headers to their index positions
+            self.columns = {name: idx for idx, name in enumerate(headers)}
+            print("Column headers retrieved:", self.columns)
 
     def find_contract_row(self, contract_name, machine, user):
         try:
             data = self.worksheet.get_all_values()
+            contract_idx = self.columns['contract_name']
+            machine_idx = self.columns['machine']
+            user_idx = self.columns['user']
             for idx, row in enumerate(data):
-                if row[0] == contract_name and row[1] == machine and row[2] == user:
+                if row[contract_idx] == contract_name and row[machine_idx] == machine and row[user_idx] == user:
                     return idx + 1  # +1 because spreadsheet rows are 1-indexed
             return None
         except Exception as e:
@@ -479,11 +487,9 @@ class StatusSheet(GoogleSheet):
             print(f"Contract '{contract_name}' already exists. Not adding.")
             return
 
-        # Assuming 'contract', 'machine', 'user' are the first three columns
-        new_row_values = [contract_name, machine, user] + [''] * (len(self.worksheet.row_values(1)) - 3)
+        new_row_values = [contract_name, machine, user] + [''] * (len(self.columns) - 3)
         self.worksheet.append_row(new_row_values)
         print(f"Contract '{contract_name}' added with machine '{machine}' and user '{user}'.")
-
 
     def update_status(self, contract_name, machine, user, column_name, status):
         row_index = self.find_contract_row(contract_name, machine, user)
@@ -493,24 +499,16 @@ class StatusSheet(GoogleSheet):
             row_index = self.find_contract_row(contract_name, machine, user)
 
         try:
-            col_index = self.worksheet.row_values(1).index(column_name) + 1  # +1 for 1-indexed columns
+            col_index = self.columns[column_name] + 1  # +1 for 1-indexed columns
             self.update_cell(self.worksheet, row_index, col_index, status)
             print(f"Status '{status}' updated for '{contract_name}' in column '{column_name}'.")
-        except ValueError:
+        except KeyError:
             print(f"Column '{column_name}' not found.")
         except Exception as e:
             print(f"Error updating status: {e}")
             raise
 
     def update_status_multiple(self, contract_name, machine, user, status_updates):
-        """
-        Updates multiple statuses for a given contract_name, machine, and user.
-
-        :param contract_name: The contract name
-        :param machine: The machine name
-        :param user: The user name
-        :param status_updates: A dictionary where keys are column names and values are statuses
-        """
         row_index = self.find_contract_row(contract_name, machine, user)
         
         if row_index is None:
@@ -519,10 +517,10 @@ class StatusSheet(GoogleSheet):
 
         try:
             for column_name, status in status_updates.items():
-                col_index = self.worksheet.row_values(1).index(column_name) + 1  # +1 for 1-indexed columns
+                col_index = self.columns[column_name] + 1  # +1 for 1-indexed columns
                 self.update_cell(self.worksheet, row_index, col_index, status)
             print(f"Statuses updated for '{contract_name}'.")
-        except ValueError as e:
+        except KeyError as e:
             print(f"Column not found: {e}")
         except Exception as e:
             print(f"Error updating statuses: {e}")
@@ -575,13 +573,12 @@ class StatusSheet(GoogleSheet):
             return None
 
         try:
-            column_names = self.worksheet.row_values(1)
-            if column_name not in column_names:
+            if column_name not in self.columns:
                 print(f"Column '{column_name}' not found.")
                 return None
 
-            col_index = column_names.index(column_name) + 1  # +1 for 1-indexed columns
-            return self.read_cell(self.worksheet, row_index, col_index)
+            col_index = self.columns[column_name] + 1  # +1 for 1-indexed columns
+            return self.worksheet.cell(row_index, col_index).value
         except Exception as e:
             print(f"Error retrieving status from column '{column_name}': {e}")
             return None
