@@ -26,20 +26,21 @@ import shutil
 
 cfg = u.read_config()
 
-def tabei_create_thumbnails(country, contract_name):
+def tabei_create_thumbnails(country, contract_code, contract_alias):
     t = TabeiClient()
     env_interpreter = os.path.join(cfg['tabei']['conda_env'], "bin", "python")
     cmd_path = os.path.join(cfg['tabei']['stitching-services'], "Tabei/create_thumbnails.py") 
-    command = f"{env_interpreter} {cmd_path} --country {country} --contract_name {contract_name}"
+    command = f"{env_interpreter} {cmd_path} --country {country} --contract_code {contract_code} --contract_alias {contract_alias}"
     print("sending command to create thumbnails...")
     t.execute_command(command, cfg['tabei']['stitching-services'])
 
 
-def download_thumbnails(country, contract_name):
+def download_thumbnails(country, contract_alias):
+ 
     t = TabeiClient()
-    thumb_zip_remote = os.path.join(cfg['tabei']['thumbnails_folder'], country, contract_name, "thumbnails.zip")
+    thumb_zip_remote = os.path.join(cfg['tabei']['thumbnails_folder'], country, contract_alias, "thumbnails.zip")
     thumb_local = os.path.join(cfg['local']['thumbnails_folder'], country)
-    thumb_zip_local = os.path.join(thumb_local, f"{contract_name}.zip")
+    thumb_zip_local = os.path.join(thumb_local, f"{contract_alias}.zip")
     
 
     # ensure that we have the local folders
@@ -49,7 +50,7 @@ def download_thumbnails(country, contract_name):
     t.download_files_sftp([thumb_zip_remote], [thumb_zip_local])
 
     # Extract the zip file
-    extract_folder = os.path.join(thumb_local, contract_name)
+    extract_folder = os.path.join(thumb_local, contract_alias)
  
     # Check if the folder exists
     if os.path.exists(extract_folder):
