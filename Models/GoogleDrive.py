@@ -463,7 +463,7 @@ class StatusSheet(GoogleSheet):
         else:
             # Map headers to their index positions
             self.columns = {name: idx for idx, name in enumerate(headers)}
-            print("Column headers retrieved:", self.columns)
+            # print("Column headers retrieved:", self.columns)
 
     def find_contract_row(self, contract_name, machine, user):
         try:

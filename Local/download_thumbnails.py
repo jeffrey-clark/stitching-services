@@ -26,7 +26,7 @@ import shutil
 
 cfg = u.read_config()
 
-def tabei_create_thumbnails(country, contract_code, contract_alias):
+def tabei_create_thumbnails_contract(country, contract_code, contract_alias):
     t = TabeiClient()
     env_interpreter = os.path.join(cfg['tabei']['conda_env'], "bin", "python")
     cmd_path = os.path.join(cfg['tabei']['stitching-services'], "Tabei/create_thumbnails.py") 
@@ -35,22 +35,33 @@ def tabei_create_thumbnails(country, contract_code, contract_alias):
     t.execute_command(command, cfg['tabei']['stitching-services'])
 
 
-def download_thumbnails(country, contract_alias):
+def tabei_create_thumbnails_filepaths(filepaths, output_dir):
+    t = TabeiClient()
+    env_interpreter = os.path.join(cfg['tabei']['conda_env'], "bin", "python")
+    cmd_path = os.path.join(cfg['tabei']['stitching-services'], "Tabei/create_thumbnails_filepaths.py")
+    filepaths_str = " ".join(filepaths)
+    command = f"{env_interpreter} {cmd_path} --filepaths {filepaths_str} --outputdir {output_dir}"
+    print("sending command to create duplicate thumbnails...")
+    t.execute_command(command, cfg['tabei']['stitching-services'])
+
+
+
+
+def download_thumbnails(remote_zip_path, local_zip_path):
+
+    # raise an error of not both zip files end with ".zip"
+    if not remote_zip_path.endswith(".zip") or not local_zip_path.endswith(".zip"):
+        raise ValueError("Both remote and local zip paths must end with '.zip'.")
  
     t = TabeiClient()
-    thumb_zip_remote = os.path.join(cfg['tabei']['thumbnails_folder'], country, contract_alias, "thumbnails.zip")
-    thumb_local = os.path.join(cfg['local']['thumbnails_folder'], country)
-    thumb_zip_local = os.path.join(thumb_local, f"{contract_alias}.zip")
-    
-
     # ensure that we have the local folders
-    os.makedirs(os.path.dirname(thumb_local), exist_ok=True)
+    os.makedirs(os.path.dirname(local_zip_path), exist_ok=True)
 
     # download the zip file
-    t.download_files_sftp([thumb_zip_remote], [thumb_zip_local])
+    t.download_files_sftp([remote_zip_path], [local_zip_path])
 
     # Extract the zip file
-    extract_folder = os.path.join(thumb_local, contract_alias)
+    extract_folder = local_zip_path[:-4]
  
     # Check if the folder exists
     if os.path.exists(extract_folder):
@@ -58,13 +69,20 @@ def download_thumbnails(country, contract_alias):
         print(f"Deleted existing folder {extract_folder}.")
 
     os.makedirs(extract_folder)  # Creates the folder
-    with zipfile.ZipFile(thumb_zip_local, 'r') as zip_ref:
+    with zipfile.ZipFile(local_zip_path, 'r') as zip_ref:
         zip_ref.extractall(extract_folder)
     print(f"Extracted thumbnails to {extract_folder}.")
 
     # Delete the zip file
-    os.remove(thumb_zip_local)
+    os.remove(local_zip_path)
     print(f"Extracted thumbnails to {extract_folder} and removed the zip file.")
+
+
+
+
+
+    
+
 
 
 if __name__ == "__main__":

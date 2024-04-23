@@ -321,7 +321,7 @@ class TabeiClient:
         
     @ensure_connection('shell')
     def send_tmux_command(self, session_name, command, directory=None):
-
+        session_name = session_name.replace(" ", "_") 
         # Using bash -c to execute the tmux command
         full_command = f"bash -c \"tmux new-session -d -s {session_name} '{command}'\""
         output = self.execute_command(full_command, directory=directory)
