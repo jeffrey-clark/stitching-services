@@ -35,15 +35,8 @@ import pandas as pd
 cfg = read_config()
 
 
-def make_thumbnails(country, contract_code, contract_alias=None):
+def make_thumbnails(tabei_folders, country, contract_alias=None):
 
-    if contract_alias is None:
-        contract_alias = f"{country}_{contract_code}"
-
-    c = Country(country, refresh=True)
-
-    contract = c.get_contract(contract_code)
-    tabei_folders = contract.df.path
     # compute all of the fps
     fps = []
     for folder in tabei_folders:
@@ -106,11 +99,11 @@ def make_thumbnails(country, contract_code, contract_alias=None):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Create thumbnails from a contract")
+    parser.add_argument('--tabei_folders', nargs='+', help='List of tabei folders')
     parser.add_argument('--country', type=str, help='Country name', required=True)
-    parser.add_argument('--contract_code', type=str, help='Contract code', required=True)
     parser.add_argument('--contract_alias', type=str, help='Contract alias', required=False)
     args = parser.parse_args()
-    make_thumbnails(args.country, args.contract_code, args.contract_alias)
+    make_thumbnails(args.tabei_folders, args.country, args.contract_alias)
 
     # # If debugging use this instead
     # nigeria = Country("Nigeria", refresh=False)
