@@ -218,20 +218,28 @@ def config_format(config_data):
 
 
 
-def export_config_file(contract_name, country, config_data, machine_name):
+def export_config_file(contract_status, country, config_data, machine_name):
+
+    status = contract_status.data
+    contract_alias = status['contract_name']
+    symlink_folders = contract_status.load_symlinks(machine_name)
+
     paths = cfg[machine_name.lower()]
 
     # Machine-specific processing
     if machine_name.lower() == "savio":
         # Assuming 'folders' is already a list of paths
-        image_folders = [os.path.join(paths['images_folder'], country, os.path.basename(os.path.dirname(x))) + "/" for x in config_data['folders']]
-
+        if symlink_folders is not None:
+            image_folders = [x + "/" for x in symlink_folders]
+        else:
+            image_folders = [os.path.join(paths['images_folder'], country, os.path.basename(os.path.dirname(x))) + "/" for x in config_data['folders']]
+    
         # Machine-specific paths
         machine_specific_data = {
-            "img_cache_folder": os.path.join(paths['cache_folder'], contract_name, "SURF"),
-            "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_name),
-            "raster_output_folder": os.path.join(paths['results_folder'], contract_name),
-            "swath_folder": os.path.join(paths['cache_folder'], contract_name),
+            "img_cache_folder": os.path.join(paths['cache_folder'], contract_alias, "SURF"),
+            "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_alias),
+            "raster_output_folder": os.path.join(paths['results_folder'], contract_alias),
+            "swath_folder": os.path.join(paths['cache_folder'], contract_alias),
         }
 
     elif machine_name.lower() == "google_vm":
@@ -241,10 +249,10 @@ def export_config_file(contract_name, country, config_data, machine_name):
     
         # Machine-specific paths
         machine_specific_data = {
-            "img_cache_folder": os.path.join(dp['cache_folder'], contract_name, "SURF"),
-            "checkpoint_cache_folder": os.path.join(dp['cache_folder'], contract_name),
-            "raster_output_folder": os.path.join(dp['results_folder'], contract_name),
-            "swath_folder": os.path.join(dp['cache_folder'], contract_name)
+            "img_cache_folder": os.path.join(dp['cache_folder'], contract_alias, "SURF"),
+            "checkpoint_cache_folder": os.path.join(dp['cache_folder'], contract_alias),
+            "raster_output_folder": os.path.join(dp['results_folder'], contract_alias),
+            "swath_folder": os.path.join(dp['cache_folder'], contract_alias)
         }
 
     elif machine_name.lower() == "tabei":
@@ -252,10 +260,10 @@ def export_config_file(contract_name, country, config_data, machine_name):
         
         # Machine-specific paths
         machine_specific_data = {
-            "img_cache_folder": os.path.join(paths['cache_folder'], contract_name, "SURF"),
-            "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_name),
-            "raster_output_folder": os.path.join(paths['results_folder'], contract_name),
-            "swath_folder": os.path.join(paths['cache_folder'], contract_name),
+            "img_cache_folder": os.path.join(paths['cache_folder'], contract_alias, "SURF"),
+            "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_alias),
+            "raster_output_folder": os.path.join(paths['results_folder'], contract_alias),
+            "swath_folder": os.path.join(paths['cache_folder'], contract_alias),
         }
 
     
@@ -275,7 +283,7 @@ def export_config_file(contract_name, country, config_data, machine_name):
 
     # Write the custom YAML content to file
     os.makedirs(os.path.join("Files/config_files", machine_name.lower()), exist_ok=True)
-    output_file_path = os.path.join("Files/config_files", machine_name.lower(),  f"{contract_name}.yml")
+    output_file_path = os.path.join("Files/config_files", machine_name.lower(),  f"{contract_alias}.yml")
     with open(output_file_path, 'w') as file:
         file.write(custom_yaml_content)
 

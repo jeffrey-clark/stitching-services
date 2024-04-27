@@ -19,9 +19,12 @@ sys.path.append(root_dir)
 
 import os
 import subprocess
+import re
 
 import Functions.utilities as u
 from Models.GoogleBucket import GoogleBucket
+import pandas as pd
+from Levenshtein import distance as levenshtein_distance
 
 cfg = u.read_config()
 
@@ -31,7 +34,7 @@ def compare_folder_tabei_savio(folders, country, t, s):
     tabei_sizes = t.get_folder_total_sizes(folders)
 
     print("  Fetching filesizes from Savio:")
-    savio_directory_mappings = s.convert_to_savio_paths(folders, country)
+    savio_directory_mappings = s.convert_to_savio_folderpaths(folders, country)
     savio_paths = [savio_path for _, savio_path in savio_directory_mappings]
     savio_sizes = s.get_folder_total_sizes(savio_paths)
 
@@ -88,10 +91,15 @@ def upload_images_savio(contract_alias, folders, country, pwd, t, s):
     if len(mismatched_folders) > 0:
         # prepare the tmux upload command
         env_interpreter = os.path.join(cfg['tabei']['conda_env'], "bin", "python")
+        stitch_env = "/home/jeffrey.clark/miniconda3/envs/stitch-service/bin/python3.11"
+
         cmd_path = os.path.join(cfg['tabei']['stitching-services'], "Tabei/upload_folders.py") 
         folder_string = " ".join(mismatched_folders)
         set_password = f"export SAVIO_DECRYPTION_PASSWORD={pwd}"  # need to send the password for SavioClient decryption.
-        command = f"{set_password} && {env_interpreter} {cmd_path} --paths {folder_string} --country {country} --destination Savio"
+
+        update_status_command = f"{stitch_env} {cfg['tabei']['stitching-services']}/Local/update_status.py --machine savio --username {cfg['savio']['username']} --contract_alias {contract_alias} --column image_upload --value Done"
+
+        command = f"{set_password} && {env_interpreter} {cmd_path} --paths {folder_string} --country {country} --destination Savio && {update_status_command}"
 
         # send the command to upload
         t.send_tmux_command(f"{contract_alias}_upload", command)
@@ -186,6 +194,67 @@ def upload_images_bucket(contract_alias, folders, country, pwd, t, b, workers):
         return "Images are being uploaded. Please wait until complete."
             
     return "Complete"
+
+
+
+
+def create_symlink_db(contract, contract_alias, country, t):
+    local_dest = "Files/symlink_keys"
+    fp = f"{local_dest}/{contract_alias}_symlinks_key.xlsx"
+
+    if os.path.isfile(fp):
+        return fp
+    
+    folder_paths = contract.df.path.to_list()
+    folder_names = [os.path.basename(x.rstrip("/")) for x in folder_paths]
+    folder_ids = {name: i for i, name in enumerate(folder_names)} 
+
+    fps = t.get_filepaths_in_folders(folder_paths)
+
+    # Assuming 'fps' is a list of file paths
+    df = pd.DataFrame(fps, columns=['path'])
+
+    # Create new columns 'foldername' and 'filename' based on dirname and basename
+    df["country"] = country
+    df["contract_alias"] = contract_alias
+    df['foldername'] = df['path'].apply(lambda x: os.path.basename(os.path.dirname(x)))
+    df['filename'] = df['path'].apply(os.path.basename)
+
+    # Map foldername to folder_id using the dictionary
+    df['folder_id'] = df['foldername'].map(folder_ids)
+
+
+    # Calculate the average Levenshtein distance for each filename to all others in the group
+    def calculate_average_distances(group):
+        filenames = group['filename'].tolist()
+        results = []
+        for filename in filenames:
+            distances = [levenshtein_distance(filename, other) for other in filenames if other != filename]
+            avg_distance = sum(distances) / len(distances) if distances else 0
+            results.append(avg_distance)
+        return pd.Series(results, index=group.index)
+
+
+    df['avg_lev_distance'] = df.groupby('foldername').apply(calculate_average_distances).reset_index(level=0, drop=True)
+
+    # Filtering based on average Levenshtein distance
+    mode_distance = df['avg_lev_distance'].mode()[0]
+    print("Filtering out the following files from symlinks")
+    print(df.loc[df['avg_lev_distance'] >= 3 * mode_distance, "path"].values)
+    df = df[df['avg_lev_distance'] < 3 * mode_distance]
+
+    # Sort by folder_id and filename
+    df = df.sort_values(['folder_id', 'filename'])
+    df['file_id'] = df.groupby('folder_id').cumcount()
+
+    # Save or process data as needed
+    os.makedirs(local_dest, exist_ok=True)
+    df.to_excel(fp, index=False)
+    print("Saved symlink key file")
+    return fp
+
+
+
 
 
 

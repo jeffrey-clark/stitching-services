@@ -30,6 +30,7 @@ import io
 import gspread
 import json
 import numpy as np
+import pandas as pd
 
 import Functions.utilities as u
 from Functions.contract_utils import export_config_file, deserialize_from_google_sheet, serialize_for_google_sheet
@@ -271,7 +272,7 @@ config_columns = [
             'optim_inclusion_threshold', 'inlier_threshold', 'suspect_artifacts',	'strict_inlier_threshold',	
             'optim_inlier_threshold', 'n_within', 'n_across', 'n_swath_neighbors', 'retry_threshold',
             'n_iter', 'optim_lr_theta', 'optim_lr_scale', 'optim_lr_xy', 'raster_edge_size',
-            'raster_edge_constraint_type', 'collection_regex'
+            'raster_edge_constraint_type', 'collection_regex', "symlink"
         ]
 
 class ConfigSheet(GoogleSheet):
@@ -425,14 +426,25 @@ class ConfigSheet(GoogleSheet):
         return config_data
     
 
-    def export_config(self, contract_name, country, machine_name, export_machine_name=None):
-        config_data = self.get_config(contract_name, machine_name)
+    # def export_config(self, contract_name, country, machine_name, symlinks, export_machine_name=None):
+    #     config_data = self.get_config(contract_name, machine_name)
+    #     if export_machine_name is None:
+    #         export_machine_name = machine_name
+    #     return export_config_file(contract_name, country, config_data, export_machine_name, symlinks)
+
+    def export_config(self, contract_status, country, export_machine_name=None):
+        status = contract_status.data
+        machine = status['machine']
+        contract_alias = status['contract_name']
+
+        config_data = self.get_config(contract_alias, machine)
         if export_machine_name is None:
-            export_machine_name = machine_name
-        return export_config_file(contract_name, country, config_data, export_machine_name)
+            export_machine_name = machine
+
+        return export_config_file(contract_status, country, config_data, export_machine_name)
 
 
-status_columns = ['contract_name', 'code', 'machine', 'user', 'image_upload', 'regex_test', 'thumbnails', 'crop_params',
+status_columns = ['contract_name', 'code', 'machine', 'user', 'image_upload', 'symlinks', 'regex_test', 'thumbnails', 'crop_params',
                   'init_and_crop', 'download_cropping_sample', 'featurize', 'swath_breaks', 'rasterize_swaths', 
                   'download_swaths', 'prepare_swaths', 'export_georef_swaths', 'upload_archive_swaths', 'stitch_across', 
                   'initialize_graph', 'rasterize_clusters', 'download_clusters_1', 'new_neighbors', 'export_georef']
@@ -482,12 +494,12 @@ class StatusSheet(GoogleSheet):
     def contract_exists(self, contract_name, machine, user):
         return self.find_contract_row(contract_name, machine, user) is not None
 
-    def add_contract(self, contract_name, machine, user):
+    def add_contract(self, contract_name, machine, user, contract_code=None):
         if self.contract_exists(contract_name, machine, user):
             print(f"Contract '{contract_name}' already exists. Not adding.")
             return
-
-        new_row_values = [contract_name, machine, user] + [''] * (len(self.columns) - 3)
+            
+        new_row_values = [contract_name, contract_code, machine, user] + [''] * (len(self.columns) - 4)
         self.worksheet.append_row(new_row_values)
         print(f"Contract '{contract_name}' added with machine '{machine}' and user '{user}'.")
 
@@ -587,12 +599,14 @@ class StatusSheet(GoogleSheet):
 
 
 class Status:
-    def __init__(self, status_sheet, contract_alias, machine, user):
+    def __init__(self, status_sheet, contract_alias, machine, user, country):
         self.status_sheet = status_sheet
         self.contract_alias = contract_alias
         self.machine = machine
         self.user = user
+        self.country=country
         self.data = self.refresh_status()
+        self.symlink_folders = self.load_symlinks()
 
     def refresh_status(self):
         """
@@ -622,6 +636,28 @@ class Status:
         """
         self.status_sheet.update_status_multiple(self.contract_alias, self.machine, self.user, status_updates)
         self.refresh_status()  # Refresh the status data after updates
+
+    def load_symlinks(self, machine='tabei'):
+        symlinks_db_fp = f"{root_dir}/Files/symlink_keys/{self.contract_alias}_symlinks_key.xlsx"
+        if os.path.isfile(symlinks_db_fp):
+            symlink_db = pd.read_excel(symlinks_db_fp)
+            # Convert and zero-pad 'folder_id' and 'file_id' to a width of 4, padding with zeros on the left
+            symlink_db['folder_id'] = symlink_db['folder_id'].astype(str).str.pad(width=4, side='left', fillchar='0')
+            symlink_db['file_id'] = symlink_db['file_id'].astype(str).str.pad(width=4, side='left', fillchar='0')
+            
+            unique_series = pd.Series(symlink_db['folder_id'].unique())
+            folder_ids = unique_series.sort_values(ascending=True).values
+
+            if machine == 'tabei':
+                link_folders = [os.path.join(cfg['tabei']['symlinks_folder'], self.country, f"{self.contract_alias}_{x}") for x in folder_ids]
+            elif machine == "savio":
+                link_folders = [os.path.join(cfg['savio']['symlinks_folder'], self.country, f"{self.contract_alias}_{x}") for x in folder_ids]
+            else:
+                raise NotImplementedError(f"Symlinks for Machine '{machine}' not implemented.")
+            
+            return link_folders
+        else:
+            return None
 
 
 

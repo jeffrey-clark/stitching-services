@@ -30,10 +30,13 @@ from Local.update_apptainer import update_docker
 from tqdm import tqdm
 import time
 import re
+import collections
+import pandas as pd
 
 
-from Functions.automation_utils import upload_images_savio, upload_images_bucket
-from Local.download_thumbnails import tabei_create_thumbnails, download_thumbnails
+
+from Functions.automation_utils import upload_images_savio, upload_images_bucket, create_symlink_db
+from Local.download_thumbnails import tabei_create_thumbnails_contract, download_thumbnails, tabei_create_thumbnails_filepaths
 
 
 cfg = u.read_config()
@@ -42,12 +45,12 @@ status_db = StatusSheet(cfg['google_drive']['config_files']['id'], "status")
 
 
 
-def get_contract_status_object(contract_alias, machine):
+def get_contract_status_object(contract_alias, machine, country, contract_code=None):
     # load in the status object as contract_status
     exists = status_db.contract_exists(contract_alias, machine, cfg[machine]['username'])
     if not exists:
-        status_db.add_contract(contract_alias, machine, cfg[machine]['username'])
-    contract_status = Status(status_db, contract_alias, machine, cfg[machine]['username'])
+        status_db.add_contract(contract_alias, machine, cfg[machine]['username'], contract_code=contract_code)
+    contract_status = Status(status_db, contract_alias, machine, cfg[machine]['username'], country)
     return contract_status
 
 
@@ -79,9 +82,7 @@ def upload_images(country, contract_alias, contract, contract_status):
             t.connect('shell')
             upload_status = upload_images_savio(contract_alias, folders, country, pwd, t, s)
             t.close()
-            if upload_status != "Complete":
-                raise ValueError(upload_status)
-            
+
         elif contract_status.machine == "google_vm":
             t = TabeiClient()
             b = GoogleBucket()
@@ -92,23 +93,91 @@ def upload_images(country, contract_alias, contract, contract_status):
             upload_status = upload_images_bucket(contract_alias, folders, country, pwd, t, b, workers)
             t.close()
 
-            if upload_status != "Complete":
-                contract_status.update_status('image_upload', "Uploading...")
-                raise ValueError(upload_status)
+        if upload_status != "Complete":
+            contract_status.update_status('image_upload', "Uploading...")
+            raise ValueError(upload_status)
 
         contract_status.update_status('image_upload', "Done")
 
 
-def regex_test(contract_alias, contract, contract_status):
+
+def create_symlinks(contract_alias, country, contract, contract_status):
+    
+    status = contract_status.data
+    machine = status['machine']
+    contract_cfg = config_db.get_config(contract_alias, machine)
+
+    symlink_setting = contract_cfg.get('symlink', None)
+    symlink_active = symlink_setting is not None
+
+    if (not symlink_active) or (symlink_active and status['symlinks'] == "Done"):
+        return True
+        
+    # Create the symlinks db
+    t = TabeiClient()
+    create_symlink_db(contract, contract_alias, country, t)
+
+    # Create the symlinks on Tabei
+    t.makedirs(f"{cfg['tabei']['stitching-services']}/Files/symlink_keys")
+    tabei_symlinks_fp = f"{cfg['tabei']['stitching-services']}/Files/symlink_keys/{contract_alias}_symlinks_key.xlsx"
+    t.upload_files_sftp(
+        [f"{root_dir}/Files/symlink_keys/{contract_alias}_symlinks_key.xlsx"],
+        [tabei_symlinks_fp],
+        )
+
+    stitch_env = "/home/jeffrey.clark/miniconda3/envs/stitch-service/bin/python3.11"
+    command = f"Local/create_symlinks.py --symlinks_fp {tabei_symlinks_fp} --machine tabei"
+    print("Creating symlinks on Tabei")
+    t.execute_command(f"{stitch_env} {command}", cfg["tabei"]['stitching-services'])
+
+    # Create the symlinks on remote machine
+    shell_fp = generate_shell_script(contract_status, 'create_symlinks')
+
+    if machine == "savio":
+        s = SavioClient()
+        s.makedirs(f"{cfg['savio']['repos']}/stitching-services/Files/symlink_keys")
+
+        # create a savio shell for the link creation
+        shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+ 
+        s.upload_files_sftp(
+            [
+                f"{root_dir}/Files/symlink_keys/{contract_alias}_symlinks_key.xlsx",
+                shell_fp
+            ],
+            [
+                f"{cfg['savio']['repos']}/stitching-services/Files/symlink_keys/{contract_alias}_symlinks_key.xlsx",
+                shell_fp_remote
+            ]
+        )
+       
+        s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+        print(f"Command sent to {machine}: Create symlinks")
+
+    else:
+        raise NotImplementedError("Symlinks not implemented for Google VM")
+    
+    raise RuntimeError("Wait for the symlinks to be generated. This should take less than a minute")
+
+
+
+def regex_test(contract_alias, country, contract, contract_status):
 
     status = contract_status.data
     machine = status['machine']
+    contract_cfg = config_db.get_config(contract_alias, machine)
+    symlink_setting = contract_cfg.get('symlink', None)
 
     if contract_status.data['regex_test'] != "Done":
             
         # we need to get all filepaths
         t = TabeiClient()
-        folders = contract.df.path.to_list()
+
+        if symlink_setting is None:
+            folders = contract.df.path.to_list()
+        else:
+            folders = contract_status.load_symlinks('tabei')
+        
         fps = t.get_filepaths_in_folders(folders)
 
         # check for a custom regex pattern in the config sheet
@@ -117,8 +186,10 @@ def regex_test(contract_alias, contract, contract_status):
         if "collection_regex" in contract_cfg.keys():
             if contract_cfg['collection_regex'] != None:
                 regex_pattern = contract_cfg['collection_regex']
-
+                print("we have custom regex pattern", regex_pattern)
         p = re.compile(regex_pattern)
+        successful_indices = []
+        successful_fps = {}
         failed_fps = []
         for fp in fps:
             file = os.path.basename(fp)
@@ -126,10 +197,18 @@ def regex_test(contract_alias, contract, contract_status):
                 continue
             if ((file.endswith('.jpg') or file.endswith('.tif'))
                         and not file.startswith('._')):
-                m = p.search(file)
+                m = p.search(fp)
+
                 try:
                     new_idx0 = int(m['idx0'])
                     new_idx1 = int(m['idx1'])
+                    successful_indices.append((new_idx0, new_idx1))
+                    # add to list value of dictionary where key is the index, if non existent add with blank list, then append
+                    if (new_idx0, new_idx1) in successful_fps.keys():
+                        successful_fps[(new_idx0, new_idx1)].append(fp)
+                    else:
+                        successful_fps[(new_idx0, new_idx1)] = [fp]
+                                        
                 except:
                     failed_fps.append(fp)
             else:
@@ -139,15 +218,51 @@ def regex_test(contract_alias, contract, contract_status):
             contract_status.update_status('regex_test', f"Failed: {len(failed_fps)} {failed_fps[0:10]}")
             raise ValueError("Images need custom regex. Update config file.")
         
+        # also check so that we have no duplicate ids in successful_indices
+        if len(successful_indices) != len(set(successful_indices)):
+            duplicates = [item for item, count in collections.Counter(successful_indices).items() if count > 1]
+            duplicates_fps = []
+            for d in duplicates:
+                duplicates_fps = duplicates_fps + successful_fps[d]
+
+            # create the duplicate thumbnails
+            remote_thumbnail_dir = os.path.join(cfg['tabei']['thumbnails_folder'], country, f"{contract_alias}_duplicates")
+            remote_zip_file = os.path.join(remote_thumbnail_dir, "duplicates.zip")
+            local_zip_file = os.path.join(cfg['local']['results'], country, contract_alias, "duplicates.zip")
+
+            tabei_create_thumbnails_filepaths(duplicates_fps,  remote_thumbnail_dir)
+            download_thumbnails(remote_zip_file, local_zip_file)
+
+            contract_status.update_status('regex_test', f"Failed: Duplicate indices")
+            raise ValueError("Images have duplicate indices. Update config file.")
+
+
         print("Images paassed regex test.")
         contract_status.update_status('regex_test', f"Done")
 
 
-def create_and_download_thumbnails(country, contract_name, contract_status):
-   
-    if contract_status.data['thumbnails'] != "Done":
-        tabei_create_thumbnails(country, contract_name)
-        download_thumbnails(country, contract_name)
+
+def create_and_download_thumbnails(contract_status, country, contract):
+
+    status = contract_status.data
+    machine = status['machine']
+    contract_alias = status['contract_name']
+
+    contract_cfg = config_db.get_config(contract_alias, machine)
+    symlink_setting = contract_cfg.get('symlink', None)
+    
+
+    if symlink_setting is None:
+        tabei_folders = contract.df.path.to_list()
+    else:
+        tabei_folders = contract_status.load_symlinks('tabei')
+
+    if status['thumbnails'] != "Done":
+        tabei_create_thumbnails_contract(tabei_folders, country, contract_alias)
+        thumb_remote_zip = os.path.join(cfg['tabei']['thumbnails_folder'], country, contract_alias, "thumbnails.zip")
+        thumb_local_zip = os.path.join(cfg['local']['thumbnails_folder'], country, f"{contract_alias}.zip")
+
+        download_thumbnails(thumb_remote_zip, thumb_local_zip)
         contract_status.update_status('thumbnails', f"Done")
 
 
@@ -192,8 +307,8 @@ def upload_contract_config(contract_status, country):
     machine = contract_status.machine
     
     # export the contract for savio
-    config_fp = config_db.export_config(contract_status.contract_alias, country, machine)
-    
+    config_fp = config_db.export_config(contract_status, country, machine)
+     # (conract_status, country)
     if machine == "savio":
         s = SavioClient()
         
@@ -223,7 +338,7 @@ def initialize_and_crop(contract_alias, country, contract_status):
     if status['init_and_crop'] != "Done":
         
         # export the contract for savio
-        config_fp = config_db.export_config(contract_alias, country, machine)
+        config_fp = config_db.export_config(contract_status, country, machine)
         shell_fp = generate_shell_script(contract_status, 'initialize_and_crop')
  
         if machine == "savio":
@@ -267,24 +382,20 @@ def download_cropping_sample(contract_alias, country, contract_status):
     if status['download_cropping_sample'] != "Done":
      
         local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
+
         # make sure that we have the local dir
         os.makedirs(local_results_folder, exist_ok=True)
 
         if machine == "savio":
             s = SavioClient()
-            results_folder = os.path.join(cfg['savio']['results_folder'], contract_alias)
-            results_files = s.listdir(results_folder)
-            savio_fps = [os.path.join(results_folder, x) for x in results_files if "cropping_sample" in x]
-            local_fps = [os.path.join(local_results_folder, x) for x in results_files if "cropping_sample" in x]
-            
-            s.download_files_sftp(savio_fps, local_fps)
+            cropping_sample_folder = os.path.join(cfg['savio']['results_folder'], contract_alias, 'cropping_samples')
+            s.download_folder_sftp(cropping_sample_folder, local_results_folder)
 
         elif machine == "google_vm":
             # first find all the files called cropping_sample
             b = GoogleBucket()
-            all_fps = b.listdir_bucket(os.path.join(cfg['bucket']['root'], "results", contract_alias))
-            bucket_fps = [x for x in all_fps if "cropping_sample" in x]
-            b.download_files_from_bucket(bucket_fps, local_results_folder)
+            cropping_sample_folder = os.path.join(cfg['bucket']['root'], "results", contract_alias, 'cropping_samples')
+            b.download_folders_from_bucket([cropping_sample_folder], local_results_folder)
 
 
         contract_status.update_status('download_cropping_sample', f"Done")
@@ -293,7 +404,7 @@ def featurize(contract_status):
     
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
     if status['init_and_crop'] != "Done":
         raise RuntimeError("You need to finish the initialize and cropping stage")
@@ -334,7 +445,7 @@ def swath_breaks(contract_status):
     
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
     if status['featurize'] != "Done":
         raise RuntimeError("You need to finish the featurize stage")
@@ -372,7 +483,7 @@ def rasterize_swaths(contract_status):
     
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
     if status['swath_breaks'] != "Done":
         raise RuntimeError("You need to finish the swath_breaks stage")
@@ -406,11 +517,11 @@ def rasterize_swaths(contract_status):
         contract_status.update_status('rasterize_swaths', f"Submitted")
 
 
-def download_swaths(contract_status):
+def download_swaths(contract_status, country):
 
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
     if status['rasterize_swaths'] != "Done":
         raise RuntimeError(f"You need to finish the swath rasterization stage")
@@ -441,7 +552,7 @@ def download_img_df(contract_status):
 
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
 
     if machine == "savio":
@@ -464,7 +575,7 @@ def stitch_across(contract_status):
     
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
     if status['swath_breaks'] != "Done":
         raise RuntimeError("You need to finish the initialize and cropping stage")
@@ -510,7 +621,7 @@ def run_pipeline(contract_status, stage, required_stage=None):
 
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
     if required_stage is not None:
         if status[required_stage] != "Done":
@@ -520,15 +631,16 @@ def run_pipeline(contract_status, stage, required_stage=None):
         if machine == "savio":
                 s = SavioClient()
 
-                # # export and upload the shell script
-                # shell_fp = generate_shell_script(contract_status, 2)
-                # shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+                # export and upload the shell script
+                shell_fp = generate_shell_script(contract_status, stage)
+                shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
 
-                # s.upload_files_sftp([shell_fp], [shell_fp_remote])
+                # upload the shell script
+                s.upload_files_sftp([shell_fp], [shell_fp_remote])
 
-                # # send execution command
-                # s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
-                # print(f"Command sent to {machine}: Featurize")
+                # send execution command
+                s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+                print(f"Command sent to {machine}: {stage}")
 
         elif machine == "google_vm":
             vm = VMClient()
@@ -547,21 +659,29 @@ def run_pipeline(contract_status, stage, required_stage=None):
 
 
 
-def rasterize_clusters(contract_status, ids=None, annotate=False):
+def rasterize_clusters(contract_status, ids=None, destination_suffix=None):
     
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
     if status['initialize_graph'] != "Done":
         raise RuntimeError("You need to finish the initialize_graph stage")
     if status['rasterize_clusters'] != "Done":
         
         # export the shell script
-        shell_fp = generate_shell_script(contract_status, 'create_raster_clusters', ids=ids, annotate=annotate)
+        shell_fp = generate_shell_script(contract_status, 'create_raster_clusters', ids=ids, destination_suffix=destination_suffix)
 
         if machine == "savio":
             s = SavioClient()
+
+            # export and upload the shell script
+            shell_fp_remote = os.path.join(cfg[machine]['shells_folder'], os.path.basename(shell_fp))
+
+            s.upload_files_sftp([shell_fp], [shell_fp_remote])
+            # execute the command in a tmux session
+            s.execute_command(f"sbatch {shell_fp_remote}", cfg[machine]['shells_folder'])
+            print(f"Command sent to {machine}: rasterize_clusters")
 
         elif machine == "google_vm":
             vm = VMClient()
@@ -577,11 +697,11 @@ def rasterize_clusters(contract_status, ids=None, annotate=False):
         contract_status.update_status('rasterize_clusters', f"Submitted")
 
 
-def download_clusters(contract_status, stage, required_stage):
+def download_clusters(contract_status, country, stage, required_stage):
 
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
     if status[required_stage] != "Done":
         raise RuntimeError(f"You need to finish the {required_stage} stage")
@@ -589,6 +709,11 @@ def download_clusters(contract_status, stage, required_stage):
 
         if machine == "savio":
             s = SavioClient()
+
+            clusters_folder = os.path.join(cfg['savio']['results_folder'], contract_alias, 'clusters')
+            local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
+
+            s.download_folders_sftp([clusters_folder], local_results_folder)
 
         elif machine == "google_vm":
             b = GoogleBucket()
@@ -605,7 +730,7 @@ def download_clusters(contract_status, stage, required_stage):
 def new_neighbors(contract_status, stage, required_stage):
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
     if status[required_stage] != "Done":
         raise RuntimeError(f"You need to finish the {required_stage} stage")
@@ -641,7 +766,7 @@ def new_neighbors(contract_status, stage, required_stage):
 def export_for_georeferencing(contract_status):
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
     if status['export_georef'] != "Done":
         # parse the keep_clusters from the config file
@@ -675,7 +800,7 @@ def download_cluster_selected_raws(contract_status):
 
     status = contract_status.data
     machine = status['machine']
-    contract_alias = status['contract']
+    contract_alias = status['contract_name']
 
 
     local_raw_clusters = os.path.join(cfg['local']['results'], country, contract_alias, "clusters_w_raws")
@@ -695,7 +820,7 @@ def download_cluster_selected_raws(contract_status):
 
 
 
-def main(contract_name, country, machine, contract_alias=None, refresh_data_overview=False):
+def main(contract_name, country, machine, contract_alias=None, refresh_data_overview=False, export_swath_gcps=False, contract_code=None):
     
     machine = machine.lower()
 
@@ -703,9 +828,10 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
         contract_alias = contract_name
 
     contract = get_contract(country, contract_name, refresh_data_overview) # This is a contract object from the Data Overview
-    contract_status = get_contract_status_object(contract_alias, machine)  # This is the Google Sheet Status Row
+   
+    contract_status = get_contract_status_object(contract_alias, machine, country, contract_code=contract_code)  # This is the Google Sheet Status Row
     upload_conifg_sheet_entry(contract_alias, contract, machine)  # Add a default config row in Google Sheet Config
-
+    
     # quick fix clean country string
     country = re.sub(r"\(NCAP\)", "", country).strip()
 
@@ -713,8 +839,10 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
     # upload the services config
     # upload_services_config(machine)
 
+
     # if you need to re-upload the config, uncomment this line
     # upload_contract_config(contract_status, country)
+
 
     # If Savio, make sure we have sinularity container
     if machine == "savio":
@@ -725,10 +853,11 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
     upload_images(country, contract_alias, contract, contract_status)
 
     # Step 2: Regex Test
-    regex_test(contract_alias, contract, contract_status)
+    create_symlinks(contract_alias, country, contract, contract_status)
+    regex_test(contract_alias, country, contract, contract_status)
 
     # Step 3: Create and Download Thumbnails
-    create_and_download_thumbnails(country, contract_name, contract_status)
+    create_and_download_thumbnails(contract_status, country, contract)
 
     # Step 4: Manual Crop check
     check_if_crop_finished(contract_status)
@@ -747,7 +876,19 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
 
     # Step 9: Download Swaths
     rasterize_swaths(contract_status)
-    download_swaths(contract_status)  # only for local machine
+    download_swaths(contract_status, country)  # only for local machine
+
+
+    # Alternative Path for exporting GCPs
+    if export_swath_gcps:
+        run_pipeline(contract_status, "prepare_swaths")
+
+        export_georeferencing(contract_name, country, machine, contract_alias=contract_alias)
+        
+        upload_archive_swaths(contract_name, country, machine, contract_alias=contract_alias)
+
+        raise ValueError("STOPPED HERE")
+
 
     # Step 9: Stitch Across
     stitch_across(contract_status)
@@ -758,10 +899,10 @@ def main(contract_name, country, machine, contract_alias=None, refresh_data_over
 
     # Step 11: Create Raster
     # run_pipeline(contract_status, "create_raster_1", "initialize_graph")
-    rasterize_clusters(contract_status, ids=[0, 1, 2, 3], annotate=True)
+    rasterize_clusters(contract_status, ids=[0, 1, 2, 3])
 
     # Step 12: Download Rasters
-    download_clusters(contract_status, "download_clusters_1", "rasterize_clusters")
+    download_clusters(contract_status, country, "download_clusters_1", "rasterize_clusters")
 
     # # Step 13: New Neighbors
     # #new_neighbors(contract_status, "new_neighbors", "create_raster_1")
@@ -796,37 +937,58 @@ def prepare_swaths_georeferencing(contract_name, country, machine, contract_alia
     run_pipeline(contract_status, "prepare_swaths")
 
 
-def export_georeferencing(contract_name, country, machine, contract_alias=None, refresh_data_overview=False):
+def export_georeferencing(contract_code, country, machine, symlinks, contract_alias=None, refresh_data_overview=False):
 
     machine = machine.lower()
 
     if contract_alias is None:
-        contract_alias = contract_name
+        contract_alias = f"{country}_{contract_code}"
 
-    contract = get_contract(country, contract_name, refresh_data_overview)
+    contract = get_contract(country, contract_code, refresh_data_overview)
+    contract_status = get_contract_status_object(contract_alias, machine)  # This is the Google Sheet Status Row
+    status = contract_status.data
 
-    # download the csv file
-    b = GoogleBucket()
-    remote_csv_fp = os.path.join(cfg['bucket']['root'], "results", contract_name, "swaths_selected_raws.csv")
-    local_folder = os.path.join(cfg['local']['results'], country, contract_name)
-    b.download_files_from_bucket([remote_csv_fp],local_folder)
+    if status['prepare_swaths'] != "Done":
+        raise RuntimeError(f"You need to finish the prepare_swaths stage")
 
-    # download the swath_rasters
-    local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
-    b.download_folders_from_bucket([os.path.join(cfg['bucket']['root'], "results", contract_name, "swaths_w_raws")], local_results_folder)
+    if status['export_georef_swaths'] == "Done":
+        return True
+
+    if machine == "savio":
+        # download the csv file
+        s = SavioClient()
+        remote_csv_fp = os.path.join(cfg['savio']['results_folder'], contract_alias, "swaths_selected_raws.csv")
+        local_folder = os.path.join(cfg['local']['results'], country, contract_alias)
+        local_csv_fp = os.path.join(local_folder, os.path.basename(remote_csv_fp))
+        s.download_files_sftp([remote_csv_fp],[local_csv_fp])
+
+        # download the swath_rasters
+        local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
+        s.download_folders_sftp([os.path.join(cfg['savio']['results_folder'], contract_alias, "swaths_w_raws")], local_results_folder)
+
+    elif machine == "google_vm":
+        # download the csv file
+        b = GoogleBucket()
+        remote_csv_fp = os.path.join(cfg['bucket']['root'], "results", contract_alias, "swaths_selected_raws.csv")
+        local_folder = os.path.join(cfg['local']['results'], country, contract_alias)
+        b.download_files_from_bucket([remote_csv_fp],local_folder)
+
+        # download the swath_rasters
+        local_results_folder = os.path.join(cfg['local']['results'], country, contract_alias)
+        b.download_folders_from_bucket([os.path.join(cfg['bucket']['root'], "results", contract_alias, "swaths_w_raws")], local_results_folder)
 
     # upload the config file to Tabei (make sure that the paths are correctly specified)
-    local_config_fp = config_db.export_config(contract_alias, country, machine, "tabei")
+    local_config_fp = config_db.export_config(contract_status, country, machine, "tabei", symlinks)
     remote_config_fp = os.path.join(cfg["tabei"]['stitching_repo'], "config", country, os.path.basename(local_config_fp))
     t = TabeiClient()
-    # t.upload_files_sftp([local_config_fp], [remote_config_fp])
+    t.upload_files_sftp([local_config_fp], [remote_config_fp])
 
     # upload the swaths_selected_raws.csv from local to Tabei results folder
     local_csv_fp = os.path.join(local_folder, "swaths_selected_raws.csv")
-    tabei_results_folder = os.path.join(cfg["tabei"]['results_folder'], contract_name)
-    # t.makedirs(tabei_results_folder)
+    tabei_results_folder = os.path.join(cfg["tabei"]['results_folder'], contract_alias)
+    t.makedirs(tabei_results_folder)
     tabei_csv_fp = os.path.join(tabei_results_folder, "swaths_selected_raws.csv")
-    # t.upload_files_sftp([local_csv_fp], [tabei_csv_fp])
+    t.upload_files_sftp([local_csv_fp], [tabei_csv_fp])
 
     # Run the generate archive command
     relative_config = os.path.relpath(remote_config_fp, cfg["tabei"]['stitching_repo'])
@@ -848,27 +1010,55 @@ def export_georeferencing(contract_name, country, machine, contract_alias=None, 
     
 
     env = "/home/jeffrey.clark/miniconda3/envs/surf/bin/python3.6"
-    command = f"scripts/collect_and_zip_raws.py --config {relative_config} --replace-from {cfg['google_vm']['docker_paths']['images_folder']} --replace-to {replace_to} --group-type swaths"
+    stitch_env = "/home/jeffrey.clark/miniconda3/envs/stitch-service/bin/python3.11"
 
-    full_command = f"{env} {command}"
-    # t.send_tmux_command(f"{contract_alias}_collect_and_zip", full_command, cfg["tabei"]['stitching_repo'])
+    if machine == "savio":
+        command = f"scripts/collect_and_zip_raws.py --config {relative_config} --replace-from {cfg['savio']['images_folder']} --replace-to {replace_to} --group-type swaths"
+    elif machine == "google_vm":
+        command = f"scripts/collect_and_zip_raws.py --config {relative_config} --replace-from {cfg['google_vm']['docker_paths']['images_folder']} --replace-to {replace_to} --group-type swaths"
+    else:
+        raise RuntimeError("Machine not supported")
+    
+    update_status_command = f"{cfg['tabei']['stitching-services']}/Local/update_status.py --machine {machine} --username {cfg[machine]['username']} --contract_alias {contract_alias} --column export_georef_swaths --value Done"
+
+    full_command = f"{env} {command} && {stitch_env} {update_status_command}"
+    print(full_command)
+    t.send_tmux_command(f"{contract_alias}_collect_and_zip", full_command, cfg["tabei"]['stitching_repo'])
     print(f"Command sent to Tabei: collect_and_zip_raws")
 
-    
-    # contract_status.update_status('stitch_across', f"Submitted")
+    contract_status.update_status('export_georef_swaths', f"Submitted")
 
 
 
-def upload_archive(contract_alias, country):
+def upload_archive_swaths(contract_code, country, machine, contract_alias=None, refresh_data_overview=False):
+
+    machine = machine.lower()
+
+    if contract_alias is None:
+        contract_alias = f"{country}_{contract_code}"
+
+    contract_status = get_contract_status_object(contract_alias, machine)  # This is the Google Sheet Status Row
+    status = contract_status.data
+
+    if status['export_georef_swaths'] != "Done":
+        raise RuntimeError(f"You need to finish the export_georef_swaths stage")
+
+    if not status['upload_archive_swaths'] in [None, ""] and status['upload_archive_swaths'] != "Done":
+        raise RuntimeError(f"It seems like the uploading is in progress. Check the status in the Google Sheet")
+
     t = TabeiClient()
     env = "/home/jeffrey.clark/miniconda3/envs/stitch-service/bin/python3.11"
-    command = f"Tabei/upload_archive.py --contract {contract_alias} --country {country}"
+    stitch_env = "/home/jeffrey.clark/miniconda3/envs/stitch-service/bin/python3.11"
 
-    full_command = f"{env} {command}"
+    command = f"Tabei/upload_archive.py --contract {contract_alias} --country {country}"
+    update_status_command = f"{cfg['tabei']['stitching-services']}/Local/update_status.py --machine {machine} --username {cfg[machine]['username']} --contract_alias {contract_alias} --column upload_archive_swaths --value Done"
+
+    full_command = f"{env} {command} && {stitch_env} {update_status_command}"
+
     t.send_tmux_command(f"{contract_alias}_upload_archive", full_command, cfg["tabei"]['stitching-services'])
     print(f"Command sent to Tabei: upload archive")
 
-
+    contract_status.update_status('upload_archive_swaths', f"Uploading")
 
 if __name__ == "__main__":
 
@@ -888,9 +1078,13 @@ if __name__ == "__main__":
     # contract_name = "NCAP_DOS_126_NG"
     # contract_name = "NCAP_DOS_CAS_FI"
     # contract_name = "NCAP_DOS_CAS"
+
+    country = "Nigeria"
+    contract_code = "26_07"
     contract_name = "NCAP_DOS_212_NG"
+
     # contract_alias = "test"
-    main(contract_name, country, "savio") # , contract_alias=contract_alias)
+    main(contract_code, country, "savio", contract_alias=contract_name, export_swath_gcps=False)
 
     # prepare_swaths_georeferencing(contract_name, country, "google_vm") 
 

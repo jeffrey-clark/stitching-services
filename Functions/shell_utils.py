@@ -91,6 +91,25 @@ run_stitching_services() {{
     return shell_script_base
 
 
+def _savio_create_symlinks(contract_status):
+    
+    contract_alias = contract_status.contract_alias
+    services_repo = os.path.join(cfg['savio']['repos'], "stitching-services")
+
+
+    shell_script_content = _savio_base(contract_status, "symlinks", "00:05:00") + f"""
+# Run each stage
+echo "Creating symlinks"
+
+# call the create_symlinks script
+run_stitching_services Local/create_symlinks.py --symlinks_fp {services_repo}/Files/symlink_keys/{contract_alias}_symlinks_key.xlsx --machine savio
+
+update_status "symlinks" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
+
+
 def _savio_init_and_crop(contract_status):
     
     contract_alias = contract_status.contract_alias
@@ -117,7 +136,7 @@ echo "All stages completed successfully."
 
 
 def _savio_featurize(contract_status):
-    shell_script_content = _savio_base(contract_status, "stage_2", "24:00:00") + f"""
+    shell_script_content = _savio_base(contract_status, "featurize", "06:00:00") + f"""
 # Run each stage
 echo "starting feautrization"
 run_singularity "featurize" --only-missing
@@ -129,7 +148,7 @@ echo "All stages completed successfully."
 
 
 def _savio_swath_breaks(contract_status):
-    shell_script_content = _savio_base(contract_status, "stage_3", "24:00:00") + f"""
+    shell_script_content = _savio_base(contract_status, "swath_breaks", "24:00:00") + f"""
 # Run each stage
 echo "starting swath-breaks"
 run_singularity "swath-breaks"
@@ -166,7 +185,7 @@ echo "All stages completed successfully."
 
 
 def _savio_stitch_across(contract_status):
-    shell_script_content = _savio_base(contract_status, "stage_3", "24:00:00") + f"""
+    shell_script_content = _savio_base(contract_status, "stitch_across", "48:00:00") + f"""
 ## Run each stage
 echo "starting stitch-across"
 run_singularity "stitch-across"
@@ -177,6 +196,98 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
+def _savio_refine_and_init_graph(contract_status):
+
+    shell_script_content = _savio_base(contract_status, "initialize_graph", "12:00:00") + f"""
+# Run each stage
+echo "starting refine-links"
+run_singularity "refine-links"
+
+echo "starting initialize-graph"
+run_singularity "initialize-graph"
+
+echo "starting opt-links"
+run_singularity "opt-links"
+
+echo "starting global-opt"
+run_singularity "global-opt"
+
+update_status "initialize_graph" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
+
+
+
+
+def _savio_create_raster_clusters(contract_status, ids=None, destination_suffix=None):
+
+    contract_alias = contract_status.contract_alias
+
+    source_folder = os.path.join(cfg['savio']['results_folder'], contract_alias)
+
+    if destination_suffix is None:
+        foldername = "clusters"
+    else:
+        foldername = f"clusters_{destination_suffix}"
+
+    destination_folder = os.path.join(source_folder, foldername, "rasters")
+    destination_folder_annotated = os.path.join(source_folder,  foldername, "annotated")
+    destination_folder_geojons = os.path.join(source_folder, foldername, "geojson")
+
+    id_restriction = ""
+    if ids is not None:
+        if isinstance(ids, list):
+            ids = [str(x) for x in ids]
+            id_restriction = f"--ids {' '.join(ids)}"
+
+    shell_script_content = _savio_base(contract_status, "rasterize_clusters", "03:00:00") + f"""
+# First create the cluster rasters without annotation
+echo "starting create-raster for clusters"
+run_singularity "create-raster" --raster-type "clusters" {id_restriction}
+
+# organize the clusters in folder
+run_stitching_services VM/move_files.py --source {source_folder} --destination {destination_folder} --pattern "cluster.*\.tif$"
+run_stitching_services VM/move_files.py --source {source_folder} --destination {destination_folder_geojons} --pattern "cluster.*\.geojson$"
+
+# Second create the cluster rasters with graph annotation
+echo "starting create-raster for clusters"
+run_singularity "create-raster" --raster-type "clusters" --annotate "graph" {id_restriction}
+
+# organize the clusters in folder
+run_stitching_services VM/move_files.py --source {source_folder} --destination {destination_folder_annotated} --pattern "cluster.*\.tif$"
+run_stitching_services VM/delete_files.py --source {source_folder} --pattern "cluster.*\.geojson$"
+
+# Set update to Done
+update_status "rasterize_clusters" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
+
+
+
+
+def _savio_prepare_swaths(contract_status):
+
+    contract_alias = contract_status.contract_alias
+
+    source_folder = os.path.join(cfg['savio']['results_folder'], contract_alias)
+    destination_folder = os.path.join(source_folder, "swaths_w_raws")
+    destination_folder_geojons = os.path.join(source_folder, "swaths_w_raws/geojson")
+
+    shell_script_content = _savio_base(contract_status, "prepare_swaths", "12:00:00") + f"""
+# Run each stage
+echo "starting prepare-swaths"
+run_singularity "create-raster-w-raws" --raster-type swaths
+
+# organize the swaths with raws in folder
+run_stitching_services VM/move_files.py --source {source_folder} --destination {destination_folder}  --pattern "swath.+_w_raws\.tif$"
+run_stitching_services VM/move_files.py --source {source_folder} --destination {destination_folder_geojons} --pattern "swath.+_w_raws\.tif.geojson$"
+
+update_status "prepare_swaths" "Done"
+echo "All stages completed successfully."
+    """
+    return shell_script_content
 
 
 
@@ -375,20 +486,20 @@ echo "All stages completed successfully."
     return shell_script_content
 
 
-def _google_vm_create_raster_clusters(contract_status, ids=None, annotate=False):
+def _google_vm_create_raster_clusters(contract_status, ids=None, destination_suffix=None):
 
     vm_run_shell = os.path.join(cfg['google_vm']['vm_paths']['services_repo'], "VM/run.sh")
     contract_alias = contract_status.contract_alias
 
-    source_folder = os.path.join(cfg['google_vm']['docker_paths']['results_folder'], contract_alias)
-    destination_folder = os.path.join(source_folder, "clusters")
-    destination_folder_geojons = os.path.join(source_folder, "clusters/geojson")
+    if destination_suffix is None:
+        foldername = "clusters"
+    else:
+        foldername = f"clusters_{destination_suffix}"
 
-    annotate_option = ""
-    if annotate:
-        annotate_option = '--annotate "graph"'
-        destination_folder = os.path.join(source_folder, "clusters_annotated")
-        destination_folder_geojons = os.path.join(source_folder, "clusters_annotated/geojson")
+    source_folder = os.path.join(cfg['google_vm']['docker_paths']['results_folder'], contract_alias)
+    destination_folder = os.path.join(source_folder, foldername, "rasters")
+    destination_folder_annotated = os.path.join(source_folder,  foldername, "annotated")
+    destination_folder_geojons = os.path.join(source_folder, foldername, "geojson")
 
     id_restriction = ""
     if ids is not None:
@@ -397,18 +508,28 @@ def _google_vm_create_raster_clusters(contract_status, ids=None, annotate=False)
             id_restriction = f"--ids {' '.join(ids)}"
 
     shell_script_content = _google_vm_base(contract_status) + f"""
-# Create the cluster rasters
-echo "starting create-raster"
-run_docker "create-raster" --raster-type "clusters" {annotate_option} {id_restriction}
+
+# First create the cluster rasters without annotation
+echo "starting create-raster for clusters"
+run_docker "create-raster" --raster-type "clusters" {id_restriction}
 
 # organize the clusters in folder
-bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder} --pattern "cluster.*\.tif$"
-bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder_geojons} --pattern "cluster.*\.geojson$"
+bash {vm_run_shell}  VM/move_files.py --source {source_folder} --destination {destination_folder} --pattern "cluster.*\.tif$"
+bash {vm_run_shell}  VM/move_files.py --source {source_folder} --destination {destination_folder_geojons} --pattern "cluster.*\.geojson$"
+
+# Second create the cluster rasters with graph annotation
+echo "starting create-raster for clusters"
+run_docker "create-raster" --raster-type "clusters" --annotate "graph" {id_restriction}
+
+# organize the clusters in folder
+bash {vm_run_shell}  VM/move_files.py --source {source_folder} --destination {destination_folder_annotated} --pattern "cluster.*\.tif$"
+bash {vm_run_shell}  VM/delete_files.py --source {source_folder} --pattern "cluster.*\.geojson$"
 
 # Set update to Done
 update_status "rasterize_clusters" "Done"
 echo "All stages completed successfully."
-    """
+
+"""
     return shell_script_content
 
 
@@ -515,7 +636,7 @@ def _google_vm_prepare_swaths(contract_status):
     shell_script_content = _google_vm_base(contract_status) + f"""
 # Run each stage
 echo "starting feautrization"
-# run_docker "create-raster-w-raws" --raster-type swaths
+run_docker "create-raster-w-raws" --raster-type swaths
 
 # organize the clusters in folder
 bash {vm_run_shell} VM/move_files.py move_files --source {source_folder} --destination {destination_folder} --pattern "swath.+_w_raws\.tif$"
@@ -539,25 +660,31 @@ def generate_shell_script(contract_status, shell_template_id, **kwargs):
     machine = contract_status.machine
 
     if machine.lower() == "savio":
-        func_map = {'initialize_and_crop': _savio_init_and_crop, 
-                    'featurize': _savio_featurize, 
-                    'swath_breaks': _savio_swath_breaks,
-                    'create_raster_swaths': _savio_create_raster_swaths,
-                    'stitch_across': _savio_stitch_across,
-                    }
+        func_map = {
+            'create_symlinks': _savio_create_symlinks,
+            'initialize_and_crop': _savio_init_and_crop, 
+            'featurize': _savio_featurize, 
+            'swath_breaks': _savio_swath_breaks,
+            'create_raster_swaths': _savio_create_raster_swaths,
+            'stitch_across': _savio_stitch_across,
+            'initialize_graph': _savio_refine_and_init_graph,
+            'create_raster_clusters': _savio_create_raster_clusters,
+            'prepare_swaths': _savio_prepare_swaths
+            }
         
     elif machine.lower() == "google_vm":
-        func_map = {'initialize_and_crop': _google_vm_init_and_crop, 
-                    'featurize': _google_vm_featurize,
-                    'swath_breaks': _google_vm_swath_breaks,
-                    'create_raster_swaths': _google_vm_create_raster_swaths,
-                    'stitch_across': _google_vm_stitch_across,
-                    'initialize_graph': _google_vm_refine_and_init_graph,
-                    'create_raster_clusters': _google_vm_create_raster_clusters,
-                    'new_neighbors': _google_vm_new_neighbors,
-                    'export_georef': _google_vm_export_georef,
-                    'prepare_swaths': _google_vm_prepare_swaths
-                    }
+        func_map = {
+            'initialize_and_crop': _google_vm_init_and_crop, 
+            'featurize': _google_vm_featurize,
+            'swath_breaks': _google_vm_swath_breaks,
+            'create_raster_swaths': _google_vm_create_raster_swaths,
+            'stitch_across': _google_vm_stitch_across,
+            'initialize_graph': _google_vm_refine_and_init_graph,
+            'create_raster_clusters': _google_vm_create_raster_clusters,
+            'new_neighbors': _google_vm_new_neighbors,
+            'export_georef': _google_vm_export_georef,
+            'prepare_swaths': _google_vm_prepare_swaths
+            }
     else:
         raise ValueError('Specified machine is not supported')
     

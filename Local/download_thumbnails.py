@@ -26,11 +26,12 @@ import shutil
 
 cfg = u.read_config()
 
-def tabei_create_thumbnails_contract(country, contract_code, contract_alias):
+def tabei_create_thumbnails_contract(tabei_folders, country, contract_alias):
     t = TabeiClient()
     env_interpreter = os.path.join(cfg['tabei']['conda_env'], "bin", "python")
-    cmd_path = os.path.join(cfg['tabei']['stitching-services'], "Tabei/create_thumbnails.py") 
-    command = f"{env_interpreter} {cmd_path} --country {country} --contract_code {contract_code} --contract_alias {contract_alias}"
+    cmd_path = os.path.join(cfg['tabei']['stitching-services'], "Tabei/create_thumbnails.py")
+    folders_str = " ".join(tabei_folders)
+    command = f"{env_interpreter} {cmd_path} --tabei_folders {folders_str } --country {country} --contract_alias {contract_alias}"
     print("sending command to create thumbnails...")
     t.execute_command(command, cfg['tabei']['stitching-services'])
 
