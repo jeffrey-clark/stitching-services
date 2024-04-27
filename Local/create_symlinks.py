@@ -36,7 +36,7 @@ def create_symlinks(symlinks_fp, machine):
     if machine.lower() == "savio":
         
         for i, row in symlink_db.iterrows():
-            img_fp = os.path.join(cfg['savio']['images_folder'], row['country'], row['folder_name'], row['filename'])
+            img_fp = os.path.join(cfg['savio']['images_folder'], row['country'], row['foldername'], row['filename'])
             link_folder = os.path.join(cfg['savio']['symlinks_folder'], row['country'], f"{row['contract_alias']}_{row['folder_id']}")
             os.makedirs(link_folder, exist_ok=True)
             link_fp = os.path.join(link_folder, f"{row['contract_alias']}_{row['folder_id']}_{row['file_id']}.tif")
