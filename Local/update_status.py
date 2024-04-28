@@ -34,9 +34,9 @@ cfg = u.read_config()
 status_db = StatusSheet(cfg['google_drive']['config_files']['id'], "status")
 
 
-def update_status(contract_alias, machine, username, column, value):
+def update_status(contract_alias, country, machine, username, column, value):
 
-    contract_status = Status(status_db, contract_alias, machine, username)
+    contract_status = Status(status_db, contract_alias, machine, username, country)
     contract_status.update_status(column, value)
 
         
@@ -44,6 +44,7 @@ def update_status(contract_alias, machine, username, column, value):
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Update status in Google Sheet")
     parser.add_argument('--contract_alias', type=str, help='Contract alias of row to be updated', required=True)
+    parser.add_argument('--country', type=str, help='country', required=True)
     parser.add_argument('--machine', type=str, help='Machine of row to be updated', required=True)
     parser.add_argument('--username', type=str, help='Username of row to be updated', required=True)
     parser.add_argument('--column', type=str, help='Column to be updated', required=True)
@@ -51,6 +52,6 @@ if __name__ == "__main__":
 
     args = parser.parse_args()
 
-    update_status(args.contract_alias, args.machine, args.username, args.column, args.value)
+    update_status(args.contract_alias, args.country, args.machine, args.username, args.column, args.value)
 
     

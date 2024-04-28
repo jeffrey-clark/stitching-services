@@ -58,6 +58,7 @@ update_status() {{
     singularity run {stitching_services_sif} \\
         python3 {os.path.join(services_repo, "Local/update_status.py")} \\
         --contract_alias {contract_alias} \\
+        --country {contract_status.country} \\
         --machine savio \\
         --username {username} \\
         --column "${{column}}" \\
@@ -370,6 +371,7 @@ update_status() {{
         stitching-services \\
         python3 {docker_paths['services_repo']}/Local/update_status.py \\
         --contract_alias {contract_alias} \\
+        --country {contract_status.country} \\
         --machine google_vm \\
         --username {username} \\
         --column "${{column}}" \\
