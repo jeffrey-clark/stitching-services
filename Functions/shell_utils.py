@@ -14,6 +14,10 @@ def _savio_base(contract_status, slurm_suffix, time_limit):
     config_path = os.path.join(savio_cfg['config_folder'], f"{contract_alias}.yml")
     resources_folder = savio_cfg['resources_folder']
     stitching_services_sif = os.path.join(resources_folder, "stitching-services.sif")
+    
+    surf_sif = "/global/home/groups/co_laika/ahp/surf.sif"
+    crop_sif = os.path.join(resources_folder, "crop.sif")
+    
     ahp_repo = os.path.join(savio_cfg['repos'], "aerial-history-stitching")
     services_repo = os.path.join(savio_cfg['repos'], "stitching-services")
 
@@ -36,7 +40,7 @@ run_singularity() {{
     local stage="$1"
     shift  # Shift the first argument so that "$@" can be used for additional arguments
     
-    singularity run /global/home/groups/co_laika/ahp/surf.sif \\
+    singularity run {surf_sif} \\
         python3 {os.path.join(ahp_repo, "main.py")} \\
         --config {config_path} \\
         --stage "$stage" \\
@@ -86,6 +90,21 @@ run_stitching_services() {{
     fi
 }}
 
+# Function to run a stitching services script
+run_crop_container() {{
+    local script_path="$1"
+    shift
+    singularity run {crop_sif} \\
+        python3 {os.path.join(ahp_repo, "$script_path")} \\
+        "$@"
+
+    local exit_code=$?
+    if [ $exit_code -ne 0 ]; then
+        echo "Error: Singularity container for '$script_path' failed with exit code $exit_code."
+        exit $exit_code
+    fi
+}}
+
 
 # Placeholder for any additional common setup or functions
 """
@@ -114,18 +133,25 @@ echo "All stages completed successfully."
 def _savio_init_and_crop(contract_status):
     
     contract_alias = contract_status.contract_alias
+    savio_cfg = cfg['savio']  # Assuming cfg is a global variable that includes configuration for Savio
+    config_path = os.path.join(savio_cfg['config_folder'], f"{contract_alias}.yml")
 
     source_folder = os.path.join(cfg['savio']['results_folder'], contract_alias)
     destination_folder = os.path.join(source_folder, "cropping_samples")
 
-    shell_script_content = _savio_base(contract_status, "stage_1", "02:00:00") + f"""
+    shell_script_content = _savio_base(contract_status, "stage_1", "06:00:00") + f"""
 # Run each stage
 echo "starting initialize"
 run_singularity "initialize"
+# run_crop_container "scripts/alex_crop.py" --config {config_path} --stage "initialize"
+
 echo "starting crop"
 run_singularity "crop"
+# run_crop_container "scripts/alex_crop.py" --config {config_path} --stage "crop"
+
 echo "starting inspect-cropping"
 run_singularity "inspect-cropping"
+# run_crop_container "scripts/alex_crop.py" --config {config_path} --stage "inspect-cropping"
 
 # organize the cropping samples in folder
 run_stitching_services VM/move_files.py --source {source_folder} --destination {destination_folder} --pattern "cropping_sample.*\.jpg$"

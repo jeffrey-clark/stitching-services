@@ -45,10 +45,18 @@ The stitching services relies on Docker and Apptainer (Singularity) containers t
 In the command line run the following command to build a Docker Image from the Dockerfile.
 
 ```bash
-docker build -t stitching-services .
+docker build -f Dockerfile -t stitching-services .
 ```
 
-This is done on the VM
+This is done on the VM, where we have SUDO privileges
+
+we can also do this for additional Docker files using e.g. the cropping environment made by Alex.
+
+```
+docker build -f Dockerfile.crop -t crop .
+```
+
+
 
 
 
@@ -60,6 +68,8 @@ We need to export the Docker image, upload it to savio, and covert it there to a
 
 ```bash
 docker save stitching-services > Files/stitching-services.tar
+
+docker save crop > Files/crop.tar
 ```
 
 **Note:** if building on a MacOS device with the M1, M2, chips i.e. ARM, need to build on VM or something instead with AMD CPU. Otherwise it will confict with Savio
@@ -70,6 +80,9 @@ docker save stitching-services > Files/stitching-services.tar
 
 ```
 apptainer build stitching-services.sif docker-archive://stitching-services.tar
+
+apptainer build crop.sif docker-archive://crop.tar
+
 ```
 
 
@@ -122,7 +135,7 @@ With the Google VMs it is rather easy to install `GCSFuse`
   sudo apt-get update
   sudo apt-get install gcsfuse
 ```
-  
+
 You also need to install **Docker**
 
 - Clone the repos `stitching-services` and `aerial-history-stitching`

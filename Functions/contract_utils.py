@@ -109,14 +109,18 @@ def generate_default_config_data(df, machine):
         "optim_lr_scale": 0.05,
         "optim_lr_xy": 0.05,
         "raster_edge_size": 5000,
-        "raster_edge_constraint_type": "max"
+        "raster_edge_constraint_type": "max",
+        "num_loc": ["ll"],
+        "auto_crop": False
     }
 
     if machine.lower() == "savio":
         config_data['pool_workers'] = 40
+        config_data["n_workers"] = 40
         config_data['surf_workers'] = 8
     elif machine.lower() == "google_vm":
         config_data['pool_workers'] = 30
+        config_data["n_workers"] = 30
         config_data['surf_workers'] = 6
 
     return config_data
@@ -130,6 +134,10 @@ def config_format(config_data):
         ("", False),  # Empty string for extra newline
         ("pool_workers", False),
         ("surf_workers", False),
+        ("n_workers", False),
+        ("", False),
+        ("auto_crop", False),
+        ("num_loc", True),
         ("", False),
         ("cropping_parameters", True),
         ("cropping_std_threshold", False),
@@ -185,6 +193,9 @@ def config_format(config_data):
         ("raster_edge_constraint_type", False),
         ("", False),
         ("collection_regex", True),
+        ("", False),
+        ("gcp_folder", False),
+        ("temp_folder", False)
     ]
 
     exclude_if_None = ['collection_regex']
@@ -240,6 +251,8 @@ def export_config_file(contract_status, country, config_data, machine_name):
             "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_alias),
             "raster_output_folder": os.path.join(paths['results_folder'], contract_alias),
             "swath_folder": os.path.join(paths['cache_folder'], contract_alias),
+            'gcp_folder':  os.path.join(paths['gcp_folder'], contract_alias),
+            'temp_folder':  paths['temp_folder']
         }
 
     elif machine_name.lower() == "google_vm":
@@ -252,7 +265,10 @@ def export_config_file(contract_status, country, config_data, machine_name):
             "img_cache_folder": os.path.join(dp['cache_folder'], contract_alias, "SURF"),
             "checkpoint_cache_folder": os.path.join(dp['cache_folder'], contract_alias),
             "raster_output_folder": os.path.join(dp['results_folder'], contract_alias),
-            "swath_folder": os.path.join(dp['cache_folder'], contract_alias)
+            "swath_folder": os.path.join(dp['cache_folder'], contract_alias),
+            'gcp_folder':  os.path.join(dp['gcp_folder'], contract_alias),
+            'temp_folder': dp['temp_folder']
+
         }
 
     elif machine_name.lower() == "tabei":
@@ -264,7 +280,11 @@ def export_config_file(contract_status, country, config_data, machine_name):
             "checkpoint_cache_folder": os.path.join(paths['cache_folder'], contract_alias),
             "raster_output_folder": os.path.join(paths['results_folder'], contract_alias),
             "swath_folder": os.path.join(paths['cache_folder'], contract_alias),
+            "gcp_folder": None,
+            'temp_folder': paths['temp_folder']
         }
+
+        # raise ValueError("NO SOLUTION FOR GCP folder on Tabei. Maybe symlinks or duplicate dir")
 
     
     else:  # For 'tabei' and other machines

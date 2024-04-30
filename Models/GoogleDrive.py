@@ -261,7 +261,8 @@ class GoogleSheet:
 
 
 config_columns = [
-            'contract_name', 'machine', 'alg_kwargs', 'algorithm', 'pool_workers', 'surf_workers', 
+            'contract_name', 'machine', 'alg_kwargs', 'algorithm', 'pool_workers', 'surf_workers', 'n_workers' 
+            'symlink', 'auto_crop', 'num_loc', 
             'cropping_parameters', 'cropping_std_threshold', 'cropping_filter_sigma',
             'cropping_origin', 'cropping_mode', 'crs', 'folders', 'hessian_threshold',
             'lowe_ratio', 'min_inliers','min_matches', 'min_swath_size', 'ransac_reproj_threshold',
@@ -272,7 +273,7 @@ config_columns = [
             'optim_inclusion_threshold', 'inlier_threshold', 'suspect_artifacts',	'strict_inlier_threshold',	
             'optim_inlier_threshold', 'n_within', 'n_across', 'n_swath_neighbors', 'retry_threshold',
             'n_iter', 'optim_lr_theta', 'optim_lr_scale', 'optim_lr_xy', 'raster_edge_size',
-            'raster_edge_constraint_type', 'collection_regex', "symlink"
+            'raster_edge_constraint_type', 'collection_regex'
         ]
 
 class ConfigSheet(GoogleSheet):
