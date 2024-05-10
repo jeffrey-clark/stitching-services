@@ -327,7 +327,7 @@ class SavioClient:
         :param directories: List of Tabei directory paths
         :param country: Country name for the Savio directory structure
         """
-        directory_mappings = self.convert_to_savio_paths(directories, country)
+        directory_mappings = self.convert_to_savio_folderpaths(directories, country)
 
         for local_directory, savio_directory in directory_mappings:
             # Ensure the remote directory exists
