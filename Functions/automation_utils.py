@@ -97,7 +97,7 @@ def upload_images_savio(contract_alias, folders, country, pwd, t, s):
         folder_string = " ".join(mismatched_folders)
         set_password = f"export SAVIO_DECRYPTION_PASSWORD={pwd}"  # need to send the password for SavioClient decryption.
 
-        update_status_command = f"{stitch_env} {cfg['tabei']['stitching-services']}/Local/update_status.py --machine savio --username {cfg['savio']['username']} --contract_alias {contract_alias} --column image_upload --value Done"
+        update_status_command = f"{stitch_env} {cfg['tabei']['stitching-services']}/Local/update_status.py --machine savio --username {cfg['savio']['username']} --country {country} --contract_alias {contract_alias} --column image_upload --value Done"
 
         command = f"{set_password} && {env_interpreter} {cmd_path} --paths {folder_string} --country {country} --destination Savio && {update_status_command}"
 
@@ -185,7 +185,7 @@ def upload_images_bucket(contract_alias, folders, country, pwd, t, b, workers):
         folder_string = " ".join(mismatched_folders)
         set_password = f"export SAVIO_DECRYPTION_PASSWORD={pwd}"  # need to send the password for SavioClient decryption.
         upload_command = f"{env_interpreter} {cmd_path_upload} --paths {folder_string} --country {country} --destination Bucket --workers {workers}"
-        update_status_command = f"{env_interpreter} {cmd_path_update} --contract_alias {contract_alias} --machine google_vm --column image_upload --value Done"
+        update_status_command = f"{env_interpreter} {cmd_path_update}  --machine google_vm --username {cfg['google_vm']['username']} --country {country} --contract_alias {contract_alias} --column image_upload --value Done"
         command = f"{set_password} && {upload_command} && {update_status_command}"
 
         # send the command to upload
@@ -224,6 +224,7 @@ def create_symlink_db(contract, contract_alias, country, t):
     df['folder_id'] = df['foldername'].map(folder_ids)
 
 
+
     # Calculate the average Levenshtein distance for each filename to all others in the group
     def calculate_average_distances(group):
         filenames = group['filename'].tolist()
@@ -235,7 +236,17 @@ def create_symlink_db(contract, contract_alias, country, t):
         return pd.Series(results, index=group.index)
 
 
-    df['avg_lev_distance'] = df.groupby('foldername').apply(calculate_average_distances).reset_index(level=0, drop=True)
+    # Check if there's only one unique folder ID
+    if len(df['folder_id'].unique()) == 1:
+        # If there's only one folder ID, calculate distances directly without grouping
+        single_folder_df = df
+        avg_distances = calculate_average_distances(single_folder_df)
+    else:
+        # If there are multiple folder IDs, calculate distances by grouping
+        avg_distances = df.groupby('foldername').apply(calculate_average_distances).reset_index(level=0, drop=True)
+
+    # Merge the result back into the original DataFrame
+    df = df.merge(avg_distances.rename('avg_lev_distance'), left_index=True, right_index=True)
 
     # Filtering based on average Levenshtein distance
     mode_distance = df['avg_lev_distance'].mode()[0]

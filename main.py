@@ -109,7 +109,7 @@ def create_symlinks(contract_alias, country, contract, contract_status):
     contract_cfg = config_db.get_config(contract_alias, machine)
 
     symlink_setting = contract_cfg.get('symlink', None)
-    symlink_active = symlink_setting is not None
+    symlink_active = symlink_setting not in ["", None, False, "false"]
 
     if (not symlink_active) or (symlink_active and status['symlinks'] == "Done"):
         return True
@@ -168,13 +168,15 @@ def regex_test(contract_alias, country, contract, contract_status):
     machine = status['machine']
     contract_cfg = config_db.get_config(contract_alias, machine)
     symlink_setting = contract_cfg.get('symlink', None)
+    symlink_active = symlink_setting not in ["", None, False, "false"]
+
 
     if contract_status.data['regex_test'] != "Done":
             
         # we need to get all filepaths
         t = TabeiClient()
 
-        if symlink_setting is None:
+        if not symlink_active:
             folders = contract.df.path.to_list()
         else:
             folders = contract_status.load_symlinks('tabei')
@@ -249,11 +251,11 @@ def create_and_download_thumbnails(contract_status, country, contract):
     machine = status['machine']
     contract_alias = status['contract_name']
 
-    contract_cfg = config_db.get_config(contract_alias, machine)
+    contract_cfg = config_db.get_config(contract_alias, machine)    
     symlink_setting = contract_cfg.get('symlink', None)
-    
+    symlink_active = symlink_setting not in ["", None, False, "false"]
 
-    if symlink_setting is None:
+    if not symlink_active:
         tabei_folders = contract.df.path.to_list()
     else:
         tabei_folders = contract_status.load_symlinks('tabei')
@@ -347,7 +349,7 @@ def initialize_and_crop(contract_alias, country, contract_status):
     status = contract_status.data
     machine = status['machine']
 
-    if status['crop_params'] in ["Done", "Skip"] == False:
+    if status['crop_params'] not in ["Done", "Skip"]:
         raise RuntimeError("You need to finish the manual cropping stage")
     if status['init_and_crop'] != "Done":
         
@@ -969,6 +971,7 @@ def export_georeferencing(contract_code, country, machine, contract_alias=None, 
     machine = status['machine']
     contract_cfg = config_db.get_config(contract_alias, machine)
     symlink_setting = contract_cfg.get('symlink', None)
+    symlink_active = symlink_setting not in ["", None, False, "false"]
 
     if status['prepare_swaths'] != "Done":
         raise RuntimeError(f"You need to finish the prepare_swaths stage")
@@ -1016,7 +1019,7 @@ def export_georeferencing(contract_code, country, machine, contract_alias=None, 
     relative_config = os.path.relpath(remote_config_fp, cfg["tabei"]['stitching_repo'])
 
     # figure out the base to replace filepaths
-    if symlink_setting is None:
+    if symlink_active is False:
         folders = contract.df.path.to_list()
         if machine == "savio":
             replace_from = cfg['savio']['images_folder']

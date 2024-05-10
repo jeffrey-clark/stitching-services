@@ -303,7 +303,7 @@ class SavioClient:
                 print(f"Skipping {directory}, not a directory.")
 
 
-    def convert_to_savio_paths(self, directories, country):
+    def convert_to_savio_folderpaths(self, directories, country):
         """
         Converts Tabei directory paths to Savio directory paths.
 

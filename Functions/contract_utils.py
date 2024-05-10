@@ -235,12 +235,15 @@ def export_config_file(contract_status, country, config_data, machine_name):
     contract_alias = status['contract_name']
     symlink_folders = contract_status.load_symlinks(machine_name)
 
+    symlink_setting = config_data.get('symlink', None)
+    symlink_active = symlink_setting not in ["", None, False, "false"]
+
     paths = cfg[machine_name.lower()]
 
     # Machine-specific processing
     if machine_name.lower() == "savio":
         # Assuming 'folders' is already a list of paths
-        if symlink_folders is not None:
+        if symlink_active:
             image_folders = [x + "/" for x in symlink_folders]
         else:
             image_folders = [os.path.join(paths['images_folder'], country, os.path.basename(os.path.dirname(x))) + "/" for x in config_data['folders']]
